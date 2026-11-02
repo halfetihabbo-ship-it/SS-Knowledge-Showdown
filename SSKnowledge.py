@@ -354,23 +354,28 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
         return await interaction.response.send_message('Skipping is not enabled in this version, to avoid unfairly shortening an active question.', ephemeral=True)
 
 
-@bot.event
-async def on_ready():
-    print(f'Logged in as {bot.user}')
+async def setup_hook():
+    if GUILD_ID:
+        guild = discord.Object(id=GUILD_ID)
+        bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync(guild=guild)
+    else:
+        await bot.tree.sync()
 
+bot.setup_hook = setup_hook
 
 async def main():
     if not TOKEN:
         raise RuntimeError('Set DISCORD_TOKEN in your environment.')
     async with bot:
-        if GUILD_ID:
-            guild = discord.Object(id=GUILD_ID)
-            bot.tree.copy_global_to(guild=guild)
-            await bot.tree.sync(guild=guild)
-        else:
-            await bot.tree.sync()
         await bot.start(TOKEN)
+
+
+@bot.event
+async def on_ready():
+    print(f'Logged in as {bot.user}')
 
 
 if __name__ == '__main__':
     asyncio.run(main())
+  
