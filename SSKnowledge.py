@@ -14,6 +14,8 @@ from discord.ext import commands
 
 TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID', '0'))
+# Only these two Discord accounts may manage quizzes.
+HOST_IDS = {1501587787294703657, 1204163177793720331}
 MAX_PLAYERS = 50
 QUESTION_COUNT = 25
 ANSWER_SECONDS = 15
@@ -119,7 +121,7 @@ def load_questions(quiz_key):
 
 
 def host_only(interaction):
-    return interaction.user.guild_permissions.manage_guild
+    return interaction.guild is not None and interaction.user.id in HOST_IDS
 
 
 # Discord embeds support one accent colour, not a custom background or font.
@@ -223,7 +225,7 @@ class LobbyView(discord.ui.View):
     async def start_now(self, interaction: discord.Interaction, button: discord.ui.Button):
         game = self.game
         if not host_only(interaction):
-            return await private_notice(interaction, 'Only hosts with Manage Server permission can start early.', success=False)
+            return await private_notice(interaction, 'Only authorised quiz hosts can start early.', success=False)
         if game.phase != 'lobby' or game.lobby_start.is_set():
             return await private_notice(interaction, 'The lobby is already closed.', success=False)
         if len(game.players) < MIN_PLAYERS:
@@ -520,7 +522,7 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
             return await respond_branded(interaction, game.leaderboard(), 'leaderboard', quiz_key=game.quiz_key)
         return await interaction.response.send_message('Choose a quiz to view its leaderboard:', view=ThemeSelectView('records'), ephemeral=True)
     if not host_only(interaction):
-        return await private_notice(interaction, 'Only members with Manage Server permission can host quizzes.', success=False)
+        return await private_notice(interaction, 'Only the two authorised quiz hosts can manage quizzes.', success=False)
     if command == 'start':
         if game:
             return await private_notice(interaction, 'A quiz is already running in this server.', success=False)
