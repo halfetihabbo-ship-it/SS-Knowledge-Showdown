@@ -13,10 +13,10 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID', '0'))
 MAX_PLAYERS = 50
 QUESTION_COUNT = 25
-ANSWER_SECONDS = 15
-LOBBY_SECONDS = 120
+ANSWER_SECONDS = 30
+LOBBY_SECONDS = 600
 INTERMISSION_SECONDS = 7
-TIE_READY_SECONDS = 30
+TIE_READY_SECONDS = 120
 QUESTION_FILE = Path(__file__).with_name('questions.json')
 
 intents = discord.Intents.default()
@@ -76,6 +76,19 @@ class LobbyView(discord.ui.View):
         await game.refresh_lobby()
 
 
+    @discord.ui.button(label='Start Now (Host)', style=discord.ButtonStyle.primary, emoji='🚀')
+    async def start_now(self, interaction: discord.Interaction, button: discord.ui.Button):
+        game = self.game
+        if not host_only(interaction):
+            return await interaction.response.send_message('Only hosts with Manage Server permission can start early.', ephemeral=True)
+        if game.phase != 'lobby' or game.lobby_start.is_set():
+            return await interaction.response.send_message('The lobby is already closed.', ephemeral=True)
+        if len(game.players) < 2:
+            return await interaction.response.send_message('At least 2 players must join before starting.', ephemeral=True)
+        game.lobby_start.set()
+        await interaction.response.send_message('🚀 Starting the quiz now!', ephemeral=True)
+
+
 class AnswerView(discord.ui.View):
     def __init__(self, game, question, eligible, seconds):
         super().__init__(timeout=None)
@@ -120,6 +133,7 @@ class Game:
         self.scores = {}
         self.streaks = {}
         self.phase = 'lobby'
+        self.lobby_start = asyncio.Event()
         self.paused = False
         self.pause_gate = asyncio.Event()
         self.pause_gate.set()
@@ -134,7 +148,7 @@ class Game:
             try:
                 await self.lobby_message.edit(embed=embed('🛡️ SS Knowledge Showdown',
                     f'**Players:** {len(self.players)}/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
-                    f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS}s\n\n'
+                    f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n\n'
                     'Click **Join Quiz** to enter!'), view=LobbyView(self))
             except discord.HTTPException:
                 pass
@@ -150,7 +164,12 @@ class Game:
 
     async def run(self):
         try:
-            if not await self.wait_or_end(LOBBY_SECONDS):
+            # Lobby closes after ten minutes, or immediately when an authorised host clicks Start Now.
+            try:
+                await asyncio.wait_for(self.lobby_start.wait(), timeout=LOBBY_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+            if self.phase == 'ended':
                 return
             if len(self.players) < 2:
                 await self.channel.send('Quiz cancelled: at least 2 players are required.')
@@ -309,7 +328,7 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
         await interaction.response.send_message('Quiz lobby created!', ephemeral=True)
         game.lobby_message = await interaction.channel.send(embed=embed('🛡️ SS Knowledge Showdown',
             f'**Players:** 0/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
-            f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS}s\n\nClick **Join Quiz** to enter!'), view=LobbyView(game))
+            f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n\nClick **Join Quiz** to enter!'), view=LobbyView(game))
         game.task = asyncio.create_task(game.run())
         return
     if not game:
