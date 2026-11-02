@@ -1,0 +1,277 @@
+[
+  {
+    "id": "q01",
+    "question": "What causes leaves to change color during autumn?",
+    "options": [
+      "The temperature increases",
+      "Chlorophyll breaks down",
+      "Leaves absorb more sunlight",
+      "The trees stop producing oxygen"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q02",
+    "question": "What is another name for autumn?",
+    "options": [
+      "Spring",
+      "Winter",
+      "Fall",
+      "Summer"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "q03",
+    "question": "Which of these fruits is commonly harvested during autumn?",
+    "options": [
+      "Apple",
+      "Watermelon",
+      "Mango",
+      "Pineapple"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "q04",
+    "question": "What is the autumnal equinox?",
+    "options": [
+      "The longest day of the year",
+      "The shortest day of the year",
+      "When day and night are approximately equal in length",
+      "The first snowfall of the year"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "q05",
+    "question": "Which animal is known for gathering nuts to prepare for winter?",
+    "options": [
+      "Dolphin",
+      "Squirrel",
+      "Penguin",
+      "Flamingo"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q06",
+    "question": "Which season comes immediately after autumn?",
+    "options": [
+      "Summer",
+      "Spring",
+      "Winter",
+      "Monsoon"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "q07",
+    "question": "Which of these is a popular autumn beverage?",
+    "options": [
+      "Pumpkin spice latte",
+      "Lemonade",
+      "Iced watermelon juice",
+      "Coconut water"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "q08",
+    "question": "What is the name of the activity where people visit farms to pick apples?",
+    "options": [
+      "Berry hunting",
+      "Apple picking",
+      "Fruit diving",
+      "Orchard racing"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q09",
+    "question": "Which hemisphere experiences autumn around September to November?",
+    "options": [
+      "Northern Hemisphere",
+      "Southern Hemisphere",
+      "Both hemispheres at the same time",
+      "Neither hemisphere"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "q10",
+    "question": "Which vegetable is commonly associated with autumn and Halloween?",
+    "options": [
+      "Cucumber",
+      "Pumpkin",
+      "Lettuce",
+      "Broccoli"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q11",
+    "question": "In which country did the famous 1621 Thanksgiving feast take place?",
+    "options": [
+      "Canada",
+      "England",
+      "United States",
+      "Australia"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "q12",
+    "question": "What year was the first famous Thanksgiving feast celebrated in Plymouth?",
+    "options": [
+      "1492",
+      "1621",
+      "1776",
+      "1865"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q13",
+    "question": "Which Native American people were present at the 1621 harvest celebration?",
+    "options": [
+      "Cherokee",
+      "Navajo",
+      "Wampanoag",
+      "Apache"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "q14",
+    "question": "Which president proclaimed Thanksgiving a national holiday in the United States in 1863?",
+    "options": [
+      "George Washington",
+      "Abraham Lincoln",
+      "Thomas Jefferson",
+      "John Adams"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q15",
+    "question": "On which day is Thanksgiving celebrated in the United States?",
+    "options": [
+      "First Monday of November",
+      "Second Thursday of November",
+      "Fourth Thursday of November",
+      "Last Sunday of November"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "q16",
+    "question": "What is the traditional main dish served at many American Thanksgiving dinners?",
+    "options": [
+      "Roast chicken",
+      "Turkey",
+      "Beef steak",
+      "Ham sandwich"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q17",
+    "question": "Which dessert is especially popular during Thanksgiving?",
+    "options": [
+      "Pumpkin pie",
+      "Cheesecake",
+      "Ice cream sundae",
+      "Chocolate mousse"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "q18",
+    "question": "What is the name of the day after Thanksgiving, famous for shopping discounts?",
+    "options": [
+      "Cyber Monday",
+      "Black Friday",
+      "Green Saturday",
+      "Shopping Sunday"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q19",
+    "question": "Which Canadian holiday is similar to American Thanksgiving?",
+    "options": [
+      "Canada Day",
+      "Victoria Day",
+      "Canadian Thanksgiving",
+      "Family Day"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "q20",
+    "question": "What is the main purpose of Thanksgiving?",
+    "options": [
+      "Celebrating the start of winter",
+      "Giving thanks and expressing gratitude",
+      "Celebrating the new year",
+      "Honoring national sports teams"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q21",
+    "question": "What is the term for animals preparing to sleep through the winter?",
+    "options": [
+      "Migration",
+      "Hibernation",
+      "Pollination",
+      "Adaptation"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q22",
+    "question": "Which spice is commonly used in pumpkin pie?",
+    "options": [
+      "Cinnamon",
+      "Paprika",
+      "Wasabi",
+      "Garlic powder"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "q23",
+    "question": "What is the name of the horn-shaped basket often filled with fruits and vegetables as a symbol of abundance?",
+    "options": [
+      "Garland",
+      "Wreath",
+      "Cornucopia",
+      "Lantern"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "q24",
+    "question": "Which sport is traditionally watched by many American families on Thanksgiving Day?",
+    "options": [
+      "Basketball",
+      "American football",
+      "Tennis",
+      "Golf"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "q25",
+    "question": "What is the name of the famous parade held annually on Thanksgiving morning in New York City?",
+    "options": [
+      "Macy's Thanksgiving Day Parade",
+      "New York Winter Festival",
+      "Thanksgiving Harvest Parade",
+      "American Autumn Parade"
+    ],
+    "answer": 0
+  }
+]
