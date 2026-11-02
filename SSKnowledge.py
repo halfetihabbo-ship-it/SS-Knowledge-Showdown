@@ -26,7 +26,7 @@ DATA_DIR = Path(os.getenv('DATA_DIR', str(Path(__file__).parent)))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_FILE = DATA_DIR / 'quiz_history.sqlite3'
 SS_LOGO_URL = os.getenv('SS_LOGO_URL', '').strip()
-ASSET_DIR = Path(__file__).with_name('assets')
+ASSET_DIR = Path(__file__).parent
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix='!', intents=intents)
