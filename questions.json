@@ -1,0 +1,691 @@
+[
+  {
+    "difficulty": "easy",
+    "question": "What does SS stand for?",
+    "options": [
+      "Secret Service",
+      "Supreme Staff",
+      "Special Scouts",
+      "Security Service"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "easy",
+    "question": "What does NRW stand for?",
+    "options": [
+      "New Recruit Workshop",
+      "No Rules Weekend",
+      "National Rank Week",
+      "New Rules Wednesday"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "easy",
+    "question": "What is the first rank in the Standard Division?",
+    "options": [
+      "Recruit",
+      "Security",
+      "Trainee",
+      "Scouter"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "easy",
+    "question": "Which division comes after Standard?",
+    "options": [
+      "Diplomats",
+      "Security",
+      "Scouter",
+      "Trainer"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "easy",
+    "question": "Which division comes after Security?",
+    "options": [
+      "Trainer",
+      "Scouter",
+      "High Rank",
+      "Standard"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "easy",
+    "question": "Which division trains recruits?",
+    "options": [
+      "Scouter",
+      "Security",
+      "Diplomats",
+      "Trainer"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "easy",
+    "question": "Which division can normally stop wearing standard uniform?",
+    "options": [
+      "Standard",
+      "Scouter",
+      "Trainer",
+      "Security"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "easy",
+    "question": "What does ATT instruct a member to do?",
+    "options": [
+      "Request pay",
+      "Return to lobby",
+      "Stand at attention",
+      "Begin scouting"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "easy",
+    "question": "Which unit handles SS alliances?",
+    "options": [
+      "Event Planners",
+      "Pay Team",
+      "Internal Affairs",
+      "External Affairs"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "easy",
+    "question": "Which unit manages transfers alongside Ownership+?",
+    "options": [
+      "Internal Affairs",
+      "Social Affairs",
+      "Internal Investigations",
+      "External Affairs"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "Which chat colour remains prohibited during NRW?",
+    "options": [
+      "Red",
+      "Green",
+      "Yellow",
+      "Blue"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "What must members continue wearing during NRW unless exempt?",
+    "options": [
+      "An event badge",
+      "A formal suit",
+      "Their division badge",
+      "A scouting badge"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "Which training must be completed before joining Security Division?",
+    "options": [
+      "Recruit Training",
+      "HR Training",
+      "Security Training",
+      "Scouting Training"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "How many scouting logs are normally required before progressing from Scouter to Trainer?",
+    "options": [
+      "5",
+      "3",
+      "2",
+      "4"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "How many training and scouting logs are normally required to progress from Trainer to HR?",
+    "options": [
+      "4 training and 2 scouting",
+      "2 training and 3 scouting",
+      "3 training and 2 scouting",
+      "3 training and 3 scouting"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "What is the first rank in High Rank Division?",
+    "options": [
+      "Captain",
+      "Director",
+      "Commander",
+      "Supervisor"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "Which division comes immediately after High Rank?",
+    "options": [
+      "Trainer",
+      "Room Control",
+      "Security",
+      "Diplomats"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "How many daily pay times does SS have?",
+    "options": [
+      "4",
+      "6",
+      "5",
+      "3"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "What are the regular GMT pay times?",
+    "options": [
+      "3, 7 and 11 AM and PM",
+      "1, 5 and 9 AM and PM",
+      "2, 6 and 10 AM and PM",
+      "4, 8 and 12 AM and PM"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "Where can members check their pay balance?",
+    "options": [
+      "forum.habboss.org",
+      "ranks.habboss.org",
+      "pay.habboss.org",
+      "balance.habboss.org"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "Which Security Station command sends a recruit to training?",
+    "options": [
+      "@red",
+      "@blue",
+      "@yellow",
+      "@green"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "Which Security Station command sends an official SS member into base?",
+    "options": [
+      "@blue",
+      "@green",
+      "@red",
+      "@yellow"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "Which command sends someone back to the lobby?",
+    "options": [
+      "@green",
+      "@red",
+      "@yellow",
+      "@blue"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "How many leadership positions can someone normally hold across Exclusive Units and Administrative Departments, subject to restrictions?",
+    "options": [
+      "Up to 3",
+      "Up to 1",
+      "Up to 2",
+      "Up to 4"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "medium",
+    "question": "After how many months of inactivity must a Standard Rank member be retrained as a Trainee?",
+    "options": [
+      "More than 1 month",
+      "More than 3 months",
+      "More than 6 months",
+      "More than 2 months"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Under the general disciplinary rule, how many ranks below must a member be for you to discipline them (outside your division)?",
+    "options": [
+      "At least 5",
+      "At least 3",
+      "At least 6",
+      "At least 4"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "What is the minimum time a disciplinary strike must remain before removal can be considered?",
+    "options": [
+      "10 days",
+      "30 days",
+      "14 days",
+      "7 days"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Who must approve removal of disciplinary strikes?",
+    "options": [
+      "Any HR member",
+      "The issuing officer alone",
+      "Event Planners leadership",
+      "Foundation or majority of Ownership"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "What follows a verbal warning in the standard disciplinary progression?",
+    "options": [
+      "Written Warning",
+      "Demotion",
+      "Firing",
+      "Suspension"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Which ranks can discipline members up to Executive Cabinet division?",
+    "options": [
+      "Room Control+",
+      "Trainer+",
+      "High Rank+",
+      "Diplomats+"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Who can issue a strike to a Room Control member?",
+    "options": [
+      "Supreme Command+",
+      "Executive Cabinet+",
+      "Diplomats+",
+      "Room Control+"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "What evidence is required before a written warning, demotion or firing?",
+    "options": [
+      "Only a verbal allegation",
+      "Only a pay log",
+      "Only a scouting log",
+      "Screenshots and/or witness evidence"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "What is the minimum suspension period before a fired member may be considered for rehiring, with approval?",
+    "options": [
+      "1 month",
+      "3 months",
+      "2 weeks",
+      "2 months"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "What is the standard station-filling requirement to claim 3 credits without add-ons?",
+    "options": [
+      "45 minutes",
+      "20 minutes",
+      "30 minutes",
+      "60 minutes"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "What is the maximum number of work logs that can count as add-ons per pay request?",
+    "options": [
+      "1",
+      "3",
+      "2",
+      "4"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "How many credits does a qualifying 20-minute payban add?",
+    "options": [
+      "1 credit",
+      "2 credits",
+      "4 credits",
+      "3 credits"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "When using 2 hours online to qualify for pay, what must happen to the main account?",
+    "options": [
+      "Remain on the hotel view",
+      "Stay offline throughout",
+      "Visit base once",
+      "Remain in base throughout"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Besides promotion workload, what two timing requirements must be satisfied?",
+    "options": [
+      "Online/observation time and promotion time difference",
+      "Scouting and payban time",
+      "Training and event attendance",
+      "Discord activity and scouting time"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "How many scouting logs are required as one alternative to station-filling workload for a Scouter promotion?",
+    "options": [
+      "2",
+      "4",
+      "1",
+      "3"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "How many training logs are required as one alternative to station-filling workload for a Trainer promotion?",
+    "options": [
+      "3",
+      "4",
+      "2",
+      "1"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Where must official scouting activities take place?",
+    "options": [
+      "Private Discord messages",
+      "Private Habbo rooms only",
+      "External agency forums",
+      "Public Habbo rooms"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Why must a potential recruit’s public profile appear in scouting evidence?",
+    "options": [
+      "To verify their avatar age",
+      "To verify they are not working for another agency",
+      "To verify their friend count",
+      "To verify their credit balance"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "What must an ALT account have before official scouting?",
+    "options": [
+      "Registration and the SS Undercover badge",
+      "An HR badge only",
+      "A new account name only",
+      "A Trainer rank"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "How many SCoTM points are awarded for a successful scouting log?",
+    "options": [
+      "1",
+      "5",
+      "2",
+      "3"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "How long must a previous SCoTM winner wait before becoming eligible again?",
+    "options": [
+      "1 week",
+      "2 weeks",
+      "3 months",
+      "1 month"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "What comes immediately after a Written Warning in the standard disciplinary progression?",
+    "options": [
+      "Firing",
+      "Verbal Warning",
+      "Suspension",
+      "Demotion"
+    ],
+    "answer": 3,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Which division is mentioned as the limit for Room Control+ disciplinary authority?",
+    "options": [
+      "Standard",
+      "Executive Cabinet",
+      "High Rank",
+      "Trainer"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "What is the usual final step in the standard disciplinary progression?",
+    "options": [
+      "Written Warning",
+      "Demotion",
+      "Fired",
+      "Payban"
+    ],
+    "answer": 2,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Which policy would you consult for requirements for a Scouter promotion?",
+    "options": [
+      "Promotion Policy",
+      "NRW Policy",
+      "Pay Policy",
+      "Disciplinary Policy"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Which policy would you consult for a strike removal request?",
+    "options": [
+      "Rank List",
+      "Disciplinary Policy",
+      "Scouting Guide",
+      "Pay Policy"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Which official guide is most relevant when checking whether scouting evidence is acceptable?",
+    "options": [
+      "Pay Policy",
+      "Scouting Guide",
+      "NRW Policy",
+      "Rank List"
+    ],
+    "answer": 1,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "Which policy is most relevant when checking whether work logs count toward pay?",
+    "options": [
+      "Pay Policy",
+      "NRW Policy",
+      "Disciplinary Policy",
+      "Promotion Policy"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  },
+  {
+    "difficulty": "hard",
+    "question": "What is the name of the award associated with scouting points?",
+    "options": [
+      "SCoTM",
+      "SoTM",
+      "NRW",
+      "OTM"
+    ],
+    "answer": 0,
+    "source": "https://habboss.org/",
+    "review_status": "CHECK_CURRENT_POLICY"
+  }
+]
