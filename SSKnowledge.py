@@ -21,7 +21,8 @@ MIN_PLAYERS = 1  # TEMPORARY: set back to 2 after testing
 LOBBY_SECONDS = 600
 INTERMISSION_SECONDS = 7
 TIE_READY_SECONDS = 120
-QUESTION_FILE = Path(__file__).with_name('questions.json')
+QUESTION_DIR = Path(__file__).with_name('questions')
+QUIZ_NAMES = {'secret_service': 'Secret Service Trivia', 'autumn_thanksgiving': 'Autumn & Thanksgiving Trivia', 'general_knowledge': 'General Knowledge Trivia'}
 DATA_DIR = Path(os.getenv('DATA_DIR', str(Path(__file__).parent)))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_FILE = DATA_DIR / 'quiz_history.sqlite3'
@@ -40,6 +41,9 @@ def db_connect():
     conn.execute('CREATE TABLE IF NOT EXISTS used_questions (guild_id INTEGER NOT NULL, question_id TEXT NOT NULL, PRIMARY KEY (guild_id, question_id))')
     conn.execute('CREATE TABLE IF NOT EXISTS rounds (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, played_at TEXT NOT NULL, player_count INTEGER NOT NULL)')
     conn.execute('CREATE TABLE IF NOT EXISTS results (round_id INTEGER NOT NULL, user_id INTEGER NOT NULL, name TEXT NOT NULL, score INTEGER NOT NULL, placement INTEGER NOT NULL, PRIMARY KEY(round_id, user_id))')
+    columns = {row[1] for row in conn.execute('PRAGMA table_info(rounds)')}
+    if 'quiz_key' not in columns:
+        conn.execute("ALTER TABLE rounds ADD COLUMN quiz_key TEXT NOT NULL DEFAULT 'legacy'")
     conn.commit()
     return conn
 
@@ -56,64 +60,54 @@ def mark_used(guild_id, questions):
 
 
 def select_questions(guild_id, bank):
-    targets = {'easy': 2, 'medium': 9, 'hard': 14}
-    with db_connect() as conn:
-        used = {row[0] for row in conn.execute('SELECT question_id FROM used_questions WHERE guild_id=?', (guild_id,))}
-    selected = []
-    for level, count in targets.items():
-        candidates = [q for q in bank if q.get('difficulty') == level]
-        if len(candidates) < count:
-            raise ValueError(f'Not enough {level} questions (need {count}).')
-        random.shuffle(candidates)
-        fresh = [q for q in candidates if question_id(q) not in used]
-        old = [q for q in candidates if question_id(q) in used]
-        selected.extend((fresh + old)[:count])
-    random.shuffle(selected)
-    mark_used(guild_id, selected)
-    return selected
+    if len(bank) < QUESTION_COUNT:
+        raise ValueError(f'Expected {QUESTION_COUNT} valid questions, found {len(bank)}.')
+    chosen = random.sample(bank, QUESTION_COUNT)
+    return chosen
 
 
 def save_round(game, final_order):
     with db_connect() as conn:
-        cursor = conn.execute('INSERT INTO rounds (guild_id, played_at, player_count) VALUES (?, ?, ?)',
-                              (game.channel.guild.id, datetime.now(timezone.utc).isoformat(timespec='seconds'), len(game.players)))
+        cursor = conn.execute('INSERT INTO rounds (guild_id, played_at, player_count, quiz_key) VALUES (?, ?, ?, ?)',
+                              (game.channel.guild.id, datetime.now(timezone.utc).isoformat(timespec='seconds'), len(game.players), game.quiz_key))
         conn.executemany('INSERT INTO results (round_id, user_id, name, score, placement) VALUES (?, ?, ?, ?, ?)',
                          [(cursor.lastrowid, uid, game.players[uid], game.scores[uid], i)
                           for i, uid in enumerate(final_order, 1)])
 
 
-def past_round_embed(guild_id, round_number=None):
+def past_round_embed(guild_id, round_number=None, quiz_key=None):
     with db_connect() as conn:
         if round_number is None:
-            item = conn.execute('SELECT id, played_at, player_count FROM rounds WHERE guild_id=? ORDER BY id DESC LIMIT 1', (guild_id,)).fetchone()
+            item = conn.execute('SELECT id, played_at, player_count, quiz_key FROM rounds WHERE guild_id=? AND quiz_key=? ORDER BY id DESC LIMIT 1', (guild_id, quiz_key)).fetchone()
         else:
-            item = conn.execute('SELECT id, played_at, player_count FROM rounds WHERE guild_id=? AND id=?', (guild_id, round_number)).fetchone()
+            item = conn.execute('SELECT id, played_at, player_count, quiz_key FROM rounds WHERE guild_id=? AND id=? AND quiz_key=?', (guild_id, round_number, quiz_key)).fetchone()
         if not item:
             return themed_embed('📜 Previous Quiz Results', 'No completed rounds found yet.')
-        rid, played_at, count = item
+        rid, played_at, count, saved_quiz_key = item
         rows = conn.execute('SELECT name, score, placement FROM results WHERE round_id=? ORDER BY placement', (rid,)).fetchall()
     medals = ['🥇', '🥈', '🥉']
     lines = [f'{medals[place-1] if place <= 3 else str(place)+"."} **{name}** — **{score:,} pts**'
              for name, score, place in rows[:50]]
-    result = themed_embed(f'Round #{rid} | Final Standings', '\n'.join(lines) or 'No scores', GOLD)
+    result = themed_embed(f'{QUIZ_NAMES.get(saved_quiz_key, saved_quiz_key)} | Round #{rid}', '\n'.join(lines) or 'No scores', GOLD)
     result.add_field(name='Completed (UTC)', value=played_at.replace('T', ' ')[:16], inline=True)
     result.add_field(name='Players', value=str(count), inline=True)
     return result
 
 
-def records_embed(guild_id):
+def records_embed(guild_id, quiz_key):
     with db_connect() as conn:
         rows = conn.execute("""SELECT user_id, MAX(name), SUM(score), COUNT(*), MAX(score)
                                FROM results JOIN rounds ON rounds.id = results.round_id
-                               WHERE rounds.guild_id=? GROUP BY user_id ORDER BY SUM(score) DESC LIMIT 15""", (guild_id,)).fetchall()
+                               WHERE rounds.guild_id=? AND rounds.quiz_key=? GROUP BY user_id ORDER BY SUM(score) DESC LIMIT 15""", (guild_id, quiz_key)).fetchall()
     lines = [f'**{i}. {name}** — **{total:,} pts** · {games_played} games · best {best:,}'
              for i, (_, name, total, games_played, best) in enumerate(rows, 1)]
-    return themed_embed('All-Time Leaderboard', '\n'.join(lines) or 'No completed games yet.', GOLD)
+    return themed_embed(f'{QUIZ_NAMES[quiz_key]} | Records', '\n'.join(lines) or 'No completed games yet.', GOLD)
 
 
 
-def load_questions():
-    data = json.loads(QUESTION_FILE.read_text(encoding='utf-8'))
+def load_questions(quiz_key):
+    path = QUESTION_DIR / f'{quiz_key}.json'
+    data = json.loads(path.read_text(encoding='utf-8'))
     valid = []
     for item in data:
         if (isinstance(item, dict) and isinstance(item.get('question'), str)
@@ -147,10 +141,12 @@ def embed(title, description='', color=SILVER):
     return themed_embed(title, description, color)
 
 
-def brand_file(e, kind='question'):
+def brand_file(e, kind='question', quiz_key='secret_service'):
     """Attach the actual SS logo artwork within a sleek header banner."""
     name = f'{kind}.png'
-    path = ASSET_DIR / name
+    path = ASSET_DIR / quiz_key / name
+    if not path.is_file():
+        path = ASSET_DIR / name
     if not path.is_file():
         path = Path(__file__).parent / name
     if path.is_file():
@@ -159,18 +155,18 @@ def brand_file(e, kind='question'):
     return None
 
 
-async def send_branded(channel, e, kind='question', **kwargs):
-    picture = brand_file(e, kind)
+async def send_branded(channel, e, kind='question', quiz_key='secret_service', **kwargs):
+    picture = brand_file(e, kind, quiz_key)
     if picture:
         kwargs['file'] = picture
     return await channel.send(embed=e, **kwargs)
 
 
-async def respond_branded(interaction, e, kind='leaderboard'):
-    picture = brand_file(e, kind)
+async def respond_branded(interaction, e, kind='leaderboard', quiz_key='secret_service', ephemeral=False):
+    picture = brand_file(e, kind, quiz_key)
     if picture:
-        return await interaction.response.send_message(embed=e, file=picture)
-    return await interaction.response.send_message(embed=e)
+        return await interaction.response.send_message(embed=e, file=picture, ephemeral=ephemeral)
+    return await interaction.response.send_message(embed=e, ephemeral=ephemeral)
 
 
 
@@ -186,8 +182,10 @@ def status_embed(title, message, highlight=False):
     return themed_embed(title, message, colour)
 
 
-def branded_lobby_embed(description):
-    e = themed_embed('SS Knowledge Showdown | Lobby', description)
+def branded_lobby_embed(description, quiz_key='secret_service'):
+    e = themed_embed(f'{QUIZ_NAMES[quiz_key]} | Lobby', description)
+    # Keep the original attachment image when the lobby is edited.
+    e.set_image(url='attachment://lobby.png')
     return e
 
 
@@ -272,8 +270,9 @@ class AnswerView(discord.ui.View):
 
 
 class Game:
-    def __init__(self, channel, host_id, questions):
+    def __init__(self, channel, host_id, questions, quiz_key):
         self.channel = channel
+        self.quiz_key = quiz_key
         self.host_id = host_id
         self.questions = questions
         self.players = {}
@@ -295,7 +294,7 @@ class Game:
                 await self.lobby_message.edit(embed=branded_lobby_embed(
                     f'**Players:** {len(self.players)}/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
                     f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n**Test mode:** {MIN_PLAYERS} player minimum\n\n'
-                    'Click **Join Quiz** to enter!'), view=LobbyView(self))
+                    'Click **Join Quiz** to enter!', self.quiz_key), view=LobbyView(self))
             except discord.HTTPException:
                 pass
 
@@ -323,7 +322,7 @@ class Game:
             self.phase = 'playing'
             if self.lobby_message:
                 await self.lobby_message.edit(view=None)
-            await self.channel.send(embed=status_embed('The Showdown Begins', f'**{len(self.players)}** competitors are ready.\n\n**25 questions**  •  **15 seconds each**  •  **Speed scoring: 4 / 3 / 2 / 1 pts**', True))
+            await self.channel.send(embed=status_embed('The Showdown Begins', f'**{QUIZ_NAMES[self.quiz_key]}**\n**{len(self.players)}** competitors are ready.\n\n**25 questions**  •  **15 seconds each**  •  **Speed scoring: 4 / 3 / 2 / 1 pts**', True))
             for i, question in enumerate(self.questions, 1):
                 if self.phase == 'ended':
                     return
@@ -333,7 +332,7 @@ class Game:
                 if self.phase == 'ended':
                     return
                 if i % 5 == 0:
-                    await send_branded(self.channel, self.leaderboard(), 'leaderboard')
+                    await send_branded(self.channel, self.leaderboard(), 'leaderboard', quiz_key=self.quiz_key)
                 if i < len(self.questions) and not await self.wait_or_end(INTERMISSION_SECONDS):
                     return
             await self.finish()
@@ -355,7 +354,7 @@ class Game:
         self.active_view = view
         title = f'SUDDEN DEATH  /  QUESTION {number}' if tie else f'QUESTION {number:02d} / {len(self.questions):02d}'
         options = '\n'.join(f'**{chr(65+i)}.** {opt}' for i, opt in enumerate(question['options']))
-        message = await send_branded(self.channel, embed(title, f"**{question['question']}**\n\n{options}\n\n⏳ {seconds} seconds to answer"), 'tiebreaker' if tie else 'question', view=view)
+        message = await send_branded(self.channel, embed(title, f"**{question['question']}**\n\n{options}\n\n⏳ {seconds} seconds to answer"), 'tiebreaker' if tie else 'question', quiz_key=self.quiz_key, view=view)
         self.active_message = message
         await asyncio.sleep(seconds)
         await view.close(message)
@@ -382,7 +381,7 @@ class Game:
         ranked = sorted(self.scores, key=lambda uid: (-self.scores[uid], self.players[uid].lower()))
         lines = [f'**{i}.** {self.players[uid]} — **{self.scores[uid]}** pts'
                  for i, uid in enumerate(ranked[:10], 1)]
-        return embed('Live Leaderboard | Top 10', '\n'.join(lines) or 'No players yet.')
+        return embed(f'{QUIZ_NAMES[self.quiz_key]} | Top 10', '\n'.join(lines) or 'No players yet.')
 
     async def finish(self):
         if self.phase == 'ended':
@@ -391,7 +390,7 @@ class Game:
         ranked_scores = sorted(set(self.scores.values()), reverse=True)
         # Resolve ties affecting the top three places; unrelated ties retain shared ranks.
         final_order = []
-        tie_pool = [q for q in load_questions() if q not in self.questions]
+        tie_pool = load_questions(self.quiz_key).copy()  # Reuse this theme's questions for tiebreakers if needed
         with db_connect() as conn:
             used = {r[0] for r in conn.execute('SELECT question_id FROM used_questions WHERE guild_id=?', (self.channel.guild.id,))}
         random.shuffle(tie_pool)
@@ -410,8 +409,8 @@ class Game:
         lines = [f'{medals[i] if i < 3 else f"{i+1}."} <@{uid}> — **{self.scores[uid]} pts**'
                  for i, uid in enumerate(final_order)]
         save_round(self, final_order)
-        await send_branded(self.channel, embed('Final Standings', '\n'.join(lines), GOLD), 'results')
-        await self.channel.send(embed=status_embed('View Previous Results', '**Round history:** `/quiz-history`\n**All-time standings:** `/quiz-records`'))
+        await send_branded(self.channel, embed(f'{QUIZ_NAMES[self.quiz_key]} | Final Standings', '\n'.join(lines), GOLD), 'results', quiz_key=self.quiz_key)
+        await self.channel.send(embed=status_embed('View Previous Results', f'**Theme:** {QUIZ_NAMES[self.quiz_key]}\n**Round history:** `/quiz-history`\n**Theme records:** `/quiz-records`'))
 
     async def resolve_tie(self, tied, score, pool):
         mentions = ' '.join(f'<@{uid}>' for uid in tied)
@@ -448,6 +447,66 @@ class Game:
         return survivors + eliminated
 
 
+class QuizSelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label='Secret Service Trivia', value='secret_service', emoji='🛡️', description='25 SS policy and agency questions'),
+            discord.SelectOption(label='Autumn & Thanksgiving Trivia', value='autumn_thanksgiving', emoji='🍂', description='25 seasonal and Thanksgiving questions'),
+            discord.SelectOption(label='General Knowledge Trivia', value='general_knowledge', emoji='🧠', description='25 mixed general knowledge questions'),
+        ]
+        super().__init__(placeholder='Choose a quiz to host...', options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if not host_only(interaction):
+            return await private_notice(interaction, 'Only hosts can start a quiz.')
+        guild_id = interaction.guild.id
+        if guild_id in games:
+            return await private_notice(interaction, 'A quiz is already active in this server.')
+        quiz_key = self.values[0]
+        try:
+            bank = load_questions(quiz_key)
+            chosen = select_questions(guild_id, bank)
+        except (ValueError, OSError, json.JSONDecodeError) as exc:
+            return await private_notice(interaction, f'Question bank error: {exc}')
+        game = Game(interaction.channel, interaction.user.id, chosen, quiz_key)
+        games[guild_id] = game
+        await private_notice(interaction, f'{QUIZ_NAMES[quiz_key]} lobby created!', success=True)
+        game.lobby_message = await send_branded(interaction.channel, branded_lobby_embed(
+            f'**Theme:** {QUIZ_NAMES[quiz_key]}\n**Players:** 0/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
+            f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n\n'
+            'Click **Join Quiz** to enter!', quiz_key), 'lobby', quiz_key=quiz_key, view=LobbyView(game))
+        game.task = asyncio.create_task(game.run())
+
+
+class QuizSelectView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=180)
+        self.add_item(QuizSelect())
+
+
+class ThemeSelect(discord.ui.Select):
+    def __init__(self, mode, round_number=None):
+        self.mode = mode
+        self.round_number = round_number
+        super().__init__(placeholder='Select a quiz leaderboard...', options=[
+            discord.SelectOption(label=name, value=key) for key, name in QUIZ_NAMES.items()
+        ])
+
+    async def callback(self, interaction: discord.Interaction):
+        key = self.values[0]
+        if self.mode == 'records':
+            e = records_embed(interaction.guild.id, key)
+        else:
+            e = past_round_embed(interaction.guild.id, self.round_number, key)
+        await respond_branded(interaction, e, 'leaderboard' if self.mode == 'records' else 'results', quiz_key=key, ephemeral=True)
+
+
+class ThemeSelectView(discord.ui.View):
+    def __init__(self, mode, round_number=None):
+        super().__init__(timeout=180)
+        self.add_item(ThemeSelect(mode, round_number))
+
+
 @bot.tree.command(name='quiz', description='SS quiz host commands')
 @app_commands.describe(action='Choose a quiz action')
 @app_commands.choices(action=[app_commands.Choice(name=x, value=x) for x in ('start', 'pause', 'resume', 'skip', 'leaderboard', 'end')])
@@ -457,28 +516,15 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
     game = games.get(interaction.guild.id)
     command = action.value
     if command == 'leaderboard':
-        return await respond_branded(interaction, game.leaderboard() if game else past_round_embed(interaction.guild.id))
+        if game:
+            return await respond_branded(interaction, game.leaderboard(), 'leaderboard', quiz_key=game.quiz_key)
+        return await interaction.response.send_message('Choose a quiz to view its leaderboard:', view=ThemeSelectView('records'), ephemeral=True)
     if not host_only(interaction):
         return await private_notice(interaction, 'Only members with Manage Server permission can host quizzes.', success=False)
     if command == 'start':
         if game:
             return await private_notice(interaction, 'A quiz is already running in this server.', success=False)
-        bank = load_questions()
-        if len(bank) < QUESTION_COUNT + 10:
-            return await private_notice(interaction, f'Add at least {QUESTION_COUNT + 10} valid questions to questions.json (25 main + 10 tiebreakers).', success=False)
-        groups = {level: [q for q in bank if q.get('difficulty') == level] for level in ('easy', 'medium', 'hard')}
-        targets = {'easy': 2, 'medium': 9, 'hard': 14}
-        if any(len(groups[level]) < count for level, count in targets.items()):
-            return await private_notice(interaction, 'Question bank needs at least 2 easy, 9 medium and 14 hard questions.', success=False)
-        chosen = select_questions(interaction.guild.id, bank)
-        game = Game(interaction.channel, interaction.user.id, chosen)
-        games[interaction.guild.id] = game
-        await private_notice(interaction, 'Quiz lobby created!', success=True)
-        game.lobby_message = await send_branded(interaction.channel, branded_lobby_embed(
-            f'**Players:** 0/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
-            f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n\nClick **Join Quiz** to enter!'), 'lobby', view=LobbyView(game))
-        game.task = asyncio.create_task(game.run())
-        return
+        return await interaction.response.send_message('Select which quiz you want to host:', view=QuizSelectView(), ephemeral=True)
     if not game:
         return await private_notice(interaction, 'No quiz is running.', success=False)
     if command == 'end':
@@ -507,14 +553,14 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
 async def quiz_history(interaction: discord.Interaction, round_number: int | None = None):
     if not interaction.guild:
         return await private_notice(interaction, 'Use this command in a server.', success=False)
-    await respond_branded(interaction, past_round_embed(interaction.guild.id, round_number), 'results')
+    await interaction.response.send_message('Choose the quiz to view its history:', view=ThemeSelectView('history', round_number), ephemeral=True)
 
 
-@bot.tree.command(name='quiz-records', description='All-time quiz leaderboard across completed games')
+@bot.tree.command(name='quiz-records', description='All-time leaderboard for each quiz theme')
 async def quiz_records(interaction: discord.Interaction):
     if not interaction.guild:
         return await private_notice(interaction, 'Use this command in a server.', success=False)
-    await respond_branded(interaction, records_embed(interaction.guild.id), 'leaderboard')
+    await interaction.response.send_message('Choose the quiz to view its records:', view=ThemeSelectView('records'), ephemeral=True)
 
 
 @bot.event
