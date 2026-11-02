@@ -95,7 +95,7 @@ def past_round_embed(guild_id, round_number=None):
     medals = ['🥇', '🥈', '🥉']
     lines = [f'{medals[place-1] if place <= 3 else str(place)+"."} **{name}** — **{score:,} pts**'
              for name, score, place in rows[:50]]
-    result = themed_embed(f'ROUND #{rid}  /  FINAL STANDINGS', '\n'.join(lines) or 'No scores', discord.Color.gold())
+    result = themed_embed(f'Round #{rid} | Final Standings', '\n'.join(lines) or 'No scores', GOLD)
     result.add_field(name='Completed (UTC)', value=played_at.replace('T', ' ')[:16], inline=True)
     result.add_field(name='Players', value=str(count), inline=True)
     return result
@@ -108,7 +108,7 @@ def records_embed(guild_id):
                                WHERE rounds.guild_id=? GROUP BY user_id ORDER BY SUM(score) DESC LIMIT 15""", (guild_id,)).fetchall()
     lines = [f'**{i}. {name}** — **{total:,} pts** · {games_played} games · best {best:,}'
              for i, (_, name, total, games_played, best) in enumerate(rows, 1)]
-    return themed_embed('ALL-TIME STANDINGS  /  SS RECORDS', '\n'.join(lines) or 'No completed games yet.', discord.Color.gold())
+    return themed_embed('All-Time Leaderboard', '\n'.join(lines) or 'No completed games yet.', GOLD)
 
 
 
@@ -128,16 +128,22 @@ def host_only(interaction):
     return interaction.user.guild_permissions.manage_guild
 
 
-def themed_embed(title, description='', color=discord.Color.from_rgb(151, 163, 178)):
-    e = discord.Embed(title=title, description=description, color=color)
-    e.set_author(name='S E C R E T   S E R V I C E   |   K N O W L E D G E   S H O W D O W N')
-    e.set_footer(text='SS KNOWLEDGE SHOWDOWN  /  OFFICIAL QUIZ EVENT')
+# Discord embeds support one accent colour, not a custom background or font.
+# Use the same restrained silver/navy styling throughout the quiz.
+SILVER = discord.Color.from_rgb(158, 175, 195)
+GOLD = discord.Color.from_rgb(194, 165, 105)
+
+
+def themed_embed(title, description='', color=None):
+    e = discord.Embed(title=title, description=description, color=color or SILVER)
+    e.set_author(name='SECRET SERVICE  |  KNOWLEDGE SHOWDOWN')
+    e.set_footer(text='SS Knowledge Showdown  •  Official Quiz')
     if SS_LOGO_URL.startswith(('https://', 'http://')):
         e.set_thumbnail(url=SS_LOGO_URL)
     return e
 
 
-def embed(title, description='', color=discord.Color.from_rgb(151, 163, 178)):
+def embed(title, description='', color=SILVER):
     return themed_embed(title, description, color)
 
 
@@ -170,18 +176,18 @@ async def respond_branded(interaction, e, kind='leaderboard'):
 
 
 async def private_notice(interaction, message, success=False):
-    colour = discord.Color.from_rgb(190, 155, 70) if success else discord.Color.from_rgb(151, 163, 178)
+    colour = GOLD if success else SILVER
     await interaction.response.send_message(
-        embed=themed_embed('CONFIRMATION' if success else 'QUIZ NOTICE', message, colour), ephemeral=True)
+        embed=themed_embed('Confirmation' if success else 'Quiz Notice', message, colour), ephemeral=True)
 
 
 def status_embed(title, message, highlight=False):
-    colour = discord.Color.from_rgb(190, 155, 70) if highlight else discord.Color.from_rgb(151, 163, 178)
+    colour = GOLD if highlight else SILVER
     return themed_embed(title, message, colour)
 
 
 def branded_lobby_embed(description):
-    e = themed_embed('SS KNOWLEDGE SHOWDOWN  /  LOBBY', description)
+    e = themed_embed('SS Knowledge Showdown | Lobby', description)
     return e
 
 
@@ -190,7 +196,7 @@ class LobbyView(discord.ui.View):
         super().__init__(timeout=None)
         self.game = game
 
-    @discord.ui.button(label='Join Quiz', style=discord.ButtonStyle.success, emoji='🎮')
+    @discord.ui.button(label='Join Quiz', style=discord.ButtonStyle.primary)
     async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
         game = self.game
         if game.phase != 'lobby':
@@ -201,7 +207,6 @@ class LobbyView(discord.ui.View):
             return await private_notice(interaction, 'This quiz is full.', success=False)
         game.players[interaction.user.id] = interaction.user.display_name
         game.scores[interaction.user.id] = 0
-        game.streaks[interaction.user.id] = 0
         await private_notice(interaction, f'You joined! Players: {len(game.players)}/{MAX_PLAYERS}', success=True)
         await game.refresh_lobby()
 
@@ -212,12 +217,11 @@ class LobbyView(discord.ui.View):
             return await private_notice(interaction, 'You are not in the open lobby.', success=False)
         game.players.pop(interaction.user.id)
         game.scores.pop(interaction.user.id, None)
-        game.streaks.pop(interaction.user.id, None)
         await private_notice(interaction, 'You left the quiz.', success=True)
         await game.refresh_lobby()
 
 
-    @discord.ui.button(label='Start Now (Host)', style=discord.ButtonStyle.primary, emoji='🚀')
+    @discord.ui.button(label='Start Now (Host)', style=discord.ButtonStyle.secondary)
     async def start_now(self, interaction: discord.Interaction, button: discord.ui.Button):
         game = self.game
         if not host_only(interaction):
@@ -237,6 +241,7 @@ class AnswerView(discord.ui.View):
         self.question = question
         self.eligible = set(eligible)
         self.answers = {}
+        self.answer_order = []  # Accepted button presses in server processing order
         self.open = True
         self.lock = asyncio.Lock()
         for index, option in enumerate(question['options']):
@@ -250,6 +255,7 @@ class AnswerView(discord.ui.View):
                     if interaction.user.id in self.answers:
                         return await private_notice(interaction, 'Your answer is already locked.', success=False)
                     self.answers[interaction.user.id] = choice
+                    self.answer_order.append(interaction.user.id)
                     await private_notice(interaction, 'Answer locked in. Your selection is private.', success=True)
             button.callback = callback
             self.add_item(button)
@@ -272,7 +278,6 @@ class Game:
         self.questions = questions
         self.players = {}
         self.scores = {}
-        self.streaks = {}
         self.phase = 'lobby'
         self.lobby_start = asyncio.Event()
         self.paused = False
@@ -313,12 +318,12 @@ class Game:
             if self.phase == 'ended':
                 return
             if len(self.players) < MIN_PLAYERS:
-                await self.channel.send(embed=status_embed('ROUND CANCELLED', f'At least **{MIN_PLAYERS}** player(s) required.'))
+                await self.channel.send(embed=status_embed('Round Cancelled', f'At least **{MIN_PLAYERS}** player(s) required.'))
                 return
             self.phase = 'playing'
             if self.lobby_message:
                 await self.lobby_message.edit(view=None)
-            await self.channel.send(embed=status_embed('THE SHOWDOWN BEGINS', f'**{len(self.players)}** competitors are ready.\n\n**25 questions**  •  **15 seconds each**  •  **100 points per correct answer**', True))
+            await self.channel.send(embed=status_embed('The Showdown Begins', f'**{len(self.players)}** competitors are ready.\n\n**25 questions**  •  **15 seconds each**  •  **Speed scoring: 4 / 3 / 2 / 1 pts**', True))
             for i, question in enumerate(self.questions, 1):
                 if self.phase == 'ended':
                     return
@@ -337,7 +342,7 @@ class Game:
         except Exception:
             import traceback
             traceback.print_exc()
-            await self.channel.send(embed=status_embed('ROUND INTERRUPTED', 'An unexpected error occurred. Please ask the host to check the bot logs.'))
+            await self.channel.send(embed=status_embed('Round Interrupted', 'An unexpected error occurred. Please ask the host to check the bot logs.'))
         finally:
             self.phase = 'ended'
             if games.get(self.channel.guild.id) is self:
@@ -358,18 +363,17 @@ class Game:
             return set()
         correct = {uid for uid, answer in view.answers.items() if answer == question['answer']}
         if not tie:
-            for uid in self.players:
-                if uid in correct:
-                    self.streaks[uid] += 1
-                    self.scores[uid] += 100
-                    if self.streaks[uid] % 3 == 0:
-                        self.scores[uid] += 100
-                else:
-                    self.streaks[uid] = 0
+            # Only correct answers earn points. Ranking uses the order in which
+            # button interactions were accepted, never the option's position.
+            correct_in_order = [uid for uid in view.answer_order if uid in correct]
+            for place, uid in enumerate(correct_in_order):
+                points = (4, 3, 2)[place] if place < 3 else 1
+                self.scores[uid] += points
         letter = chr(65 + question['answer'])
-        await self.channel.send(embed=embed('ANSWER REVEALED  /  OFFICIAL RESULT',
+        await self.channel.send(embed=embed('Answer Revealed',
             f"**{letter}. {question['options'][question['answer']]}**\n"
-            f"Correct players: **{len(correct)}/{len(eligible)}**", discord.Color.from_rgb(190, 155, 70)))
+            f"Correct players: **{len(correct)}/{len(eligible)}**\n"
+            f"Points awarded: **4** to 1st, **3** to 2nd, **2** to 3rd, **1** to remaining correct answers.", GOLD))
         self.active_view = None
         self.active_message = None
         return correct
@@ -378,12 +382,12 @@ class Game:
         ranked = sorted(self.scores, key=lambda uid: (-self.scores[uid], self.players[uid].lower()))
         lines = [f'**{i}.** {self.players[uid]} — **{self.scores[uid]}** pts'
                  for i, uid in enumerate(ranked[:10], 1)]
-        return embed('LIVE STANDINGS  /  TOP 10', '\n'.join(lines) or 'No players yet.')
+        return embed('Live Leaderboard | Top 10', '\n'.join(lines) or 'No players yet.')
 
     async def finish(self):
         if self.phase == 'ended':
             return
-        await self.channel.send(embed=status_embed('ROUND COMPLETE', 'All questions are finished. Calculating final placements and resolving any podium ties…', True))
+        await self.channel.send(embed=status_embed('Round Complete', 'All questions are finished. Calculating final placements and resolving any podium ties…', True))
         ranked_scores = sorted(set(self.scores.values()), reverse=True)
         # Resolve ties affecting the top three places; unrelated ties retain shared ranks.
         final_order = []
@@ -406,14 +410,14 @@ class Game:
         lines = [f'{medals[i] if i < 3 else f"{i+1}."} <@{uid}> — **{self.scores[uid]} pts**'
                  for i, uid in enumerate(final_order)]
         save_round(self, final_order)
-        await send_branded(self.channel, embed('FINAL STANDINGS  /  OFFICIAL RESULTS', '\n'.join(lines), discord.Color.gold()), 'results')
-        await self.channel.send(embed=status_embed('EXPLORE THE RECORDS', '**Round history:** `/quiz-history`\n**All-time standings:** `/quiz-records`'))
+        await send_branded(self.channel, embed('Final Standings', '\n'.join(lines), GOLD), 'results')
+        await self.channel.send(embed=status_embed('View Previous Results', '**Round history:** `/quiz-history`\n**All-time standings:** `/quiz-records`'))
 
     async def resolve_tie(self, tied, score, pool):
         mentions = ' '.join(f'<@{uid}>' for uid in tied)
         await self.channel.send(
             content=mentions,
-            embed=status_embed('SUDDEN DEATH  /  TIEBREAKER',
+            embed=status_embed('Sudden Death | Tiebreaker',
                 f'Competitors are tied at **{score:,} points**.\n\n**Preparation:** {TIE_READY_SECONDS // 60} minutes\n**Answer window:** 10 seconds', True),
             allowed_mentions=discord.AllowedMentions(users=True))
         if not await self.wait_or_end(TIE_READY_SECONDS):
@@ -423,7 +427,7 @@ class Game:
         round_no = 0
         while len(survivors) > 1 and self.phase != 'ended':
             if not pool:
-                await self.channel.send(embed=status_embed('TIEBREAKER ENDED', 'No unused tiebreaker questions remain. The host can resolve the remaining tie manually.'))
+                await self.channel.send(embed=status_embed('Tiebreaker Ended', 'No unused tiebreaker questions remain. The host can resolve the remaining tie manually.'))
                 break
             round_no += 1
             await self.pause_gate.wait()
@@ -431,14 +435,14 @@ class Game:
             mark_used(self.channel.guild.id, [tie_question])
             correct = await self.ask(tie_question, round_no, True, survivors)
             if not correct:
-                await self.channel.send(embed=status_embed('SUDDEN DEATH  /  NO ELIMINATIONS', 'No correct answers. All remaining competitors advance.'))
+                await self.channel.send(embed=status_embed('Sudden Death | No Eliminations', 'No correct answers. All remaining competitors advance.'))
             elif len(correct) == len(survivors):
-                await self.channel.send(embed=status_embed('SUDDEN DEATH  /  NO ELIMINATIONS', 'All competitors answered correctly. Another question follows.'))
+                await self.channel.send(embed=status_embed('Sudden Death | No Eliminations', 'All competitors answered correctly. Another question follows.'))
             else:
                 eliminated_now = [uid for uid in survivors if uid not in correct]
                 eliminated = eliminated_now + eliminated
                 survivors = [uid for uid in survivors if uid in correct]
-                await self.channel.send(embed=status_embed('SUDDEN DEATH  /  STILL IN', ', '.join(self.players[uid] for uid in survivors)))
+                await self.channel.send(embed=status_embed('Sudden Death | Still In', ', '.join(self.players[uid] for uid in survivors)))
             if len(survivors) > 1 and not await self.wait_or_end(INTERMISSION_SECONDS):
                 break
         return survivors + eliminated
