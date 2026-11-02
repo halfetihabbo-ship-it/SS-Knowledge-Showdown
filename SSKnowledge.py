@@ -2,6 +2,9 @@ import asyncio
 import json
 import os
 import random
+import sqlite3
+import hashlib
+from datetime import datetime, timezone
 from collections import defaultdict
 from pathlib import Path
 
@@ -13,15 +16,98 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID', '0'))
 MAX_PLAYERS = 50
 QUESTION_COUNT = 25
-ANSWER_SECONDS = 30
+ANSWER_SECONDS = 15
+MIN_PLAYERS = 1  # TEMPORARY: set back to 2 after testing
 LOBBY_SECONDS = 600
 INTERMISSION_SECONDS = 7
 TIE_READY_SECONDS = 120
 QUESTION_FILE = Path(__file__).with_name('questions.json')
+DATA_DIR = Path(os.getenv('DATA_DIR', str(Path(__file__).parent)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DB_FILE = DATA_DIR / 'quiz_history.sqlite3'
+SS_LOGO_URL = os.getenv('SS_LOGO_URL', '').strip()
+ASSET_DIR = Path(__file__).with_name('assets')
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix='!', intents=intents)
 games = {}
+
+
+def db_connect():
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute('CREATE TABLE IF NOT EXISTS used_questions (guild_id INTEGER NOT NULL, question_id TEXT NOT NULL, PRIMARY KEY (guild_id, question_id))')
+    conn.execute('CREATE TABLE IF NOT EXISTS rounds (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, played_at TEXT NOT NULL, player_count INTEGER NOT NULL)')
+    conn.execute('CREATE TABLE IF NOT EXISTS results (round_id INTEGER NOT NULL, user_id INTEGER NOT NULL, name TEXT NOT NULL, score INTEGER NOT NULL, placement INTEGER NOT NULL, PRIMARY KEY(round_id, user_id))')
+    conn.commit()
+    return conn
+
+
+def question_id(question):
+    # Stable across process restarts and shuffled game order.
+    payload = json.dumps([question['question'], question['options'], question['answer']], ensure_ascii=False)
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def mark_used(guild_id, questions):
+    with db_connect() as conn:
+        conn.executemany('INSERT OR IGNORE INTO used_questions VALUES (?, ?)', [(guild_id, question_id(q)) for q in questions])
+
+
+def select_questions(guild_id, bank):
+    targets = {'easy': 2, 'medium': 9, 'hard': 14}
+    with db_connect() as conn:
+        used = {row[0] for row in conn.execute('SELECT question_id FROM used_questions WHERE guild_id=?', (guild_id,))}
+    selected = []
+    for level, count in targets.items():
+        candidates = [q for q in bank if q.get('difficulty') == level]
+        if len(candidates) < count:
+            raise ValueError(f'Not enough {level} questions (need {count}).')
+        random.shuffle(candidates)
+        fresh = [q for q in candidates if question_id(q) not in used]
+        old = [q for q in candidates if question_id(q) in used]
+        selected.extend((fresh + old)[:count])
+    random.shuffle(selected)
+    mark_used(guild_id, selected)
+    return selected
+
+
+def save_round(game, final_order):
+    with db_connect() as conn:
+        cursor = conn.execute('INSERT INTO rounds (guild_id, played_at, player_count) VALUES (?, ?, ?)',
+                              (game.channel.guild.id, datetime.now(timezone.utc).isoformat(timespec='seconds'), len(game.players)))
+        conn.executemany('INSERT INTO results (round_id, user_id, name, score, placement) VALUES (?, ?, ?, ?, ?)',
+                         [(cursor.lastrowid, uid, game.players[uid], game.scores[uid], i)
+                          for i, uid in enumerate(final_order, 1)])
+
+
+def past_round_embed(guild_id, round_number=None):
+    with db_connect() as conn:
+        if round_number is None:
+            item = conn.execute('SELECT id, played_at, player_count FROM rounds WHERE guild_id=? ORDER BY id DESC LIMIT 1', (guild_id,)).fetchone()
+        else:
+            item = conn.execute('SELECT id, played_at, player_count FROM rounds WHERE guild_id=? AND id=?', (guild_id, round_number)).fetchone()
+        if not item:
+            return themed_embed('📜 Previous Quiz Results', 'No completed rounds found yet.')
+        rid, played_at, count = item
+        rows = conn.execute('SELECT name, score, placement FROM results WHERE round_id=? ORDER BY placement', (rid,)).fetchall()
+    medals = ['🥇', '🥈', '🥉']
+    lines = [f'{medals[place-1] if place <= 3 else str(place)+"."} **{name}** — **{score:,} pts**'
+             for name, score, place in rows[:50]]
+    result = themed_embed(f'🏆 Round #{rid} — Final Standings', '\n'.join(lines) or 'No scores', discord.Color.gold())
+    result.add_field(name='Completed (UTC)', value=played_at.replace('T', ' ')[:16], inline=True)
+    result.add_field(name='Players', value=str(count), inline=True)
+    return result
+
+
+def records_embed(guild_id):
+    with db_connect() as conn:
+        rows = conn.execute("""SELECT user_id, MAX(name), SUM(score), COUNT(*), MAX(score)
+                               FROM results JOIN rounds ON rounds.id = results.round_id
+                               WHERE rounds.guild_id=? GROUP BY user_id ORDER BY SUM(score) DESC LIMIT 15""", (guild_id,)).fetchall()
+    lines = [f'**{i}. {name}** — **{total:,} pts** · {games_played} games · best {best:,}'
+             for i, (_, name, total, games_played, best) in enumerate(rows, 1)]
+    return themed_embed('👑 SS All-Time Leaderboard', '\n'.join(lines) or 'No completed games yet.', discord.Color.gold())
+
 
 
 def load_questions():
@@ -40,8 +126,49 @@ def host_only(interaction):
     return interaction.user.guild_permissions.manage_guild
 
 
-def embed(title, description='', color=discord.Color.blurple()):
-    return discord.Embed(title=title, description=description, color=color)
+def themed_embed(title, description='', color=discord.Color.from_rgb(190, 155, 70)):
+    e = discord.Embed(title=title, description=description, color=color)
+    e.set_author(name='SECRET SERVICE  •  KNOWLEDGE SHOWDOWN')
+    e.set_footer(text='SS Knowledge Showdown  •  Think fast. Answer smart. Win big.')
+    if SS_LOGO_URL.startswith(('https://', 'http://')):
+        e.set_thumbnail(url=SS_LOGO_URL)
+    return e
+
+
+def embed(title, description='', color=discord.Color.from_rgb(151, 163, 178)):
+    return themed_embed(title, description, color)
+
+
+def brand_file(e, kind='question'):
+    """Attach the actual SS logo artwork within a sleek header banner."""
+    name = f'{kind}.png'
+    path = ASSET_DIR / name
+    if path.exists():
+        e.set_image(url=f'attachment://{name}')
+        return discord.File(path, filename=name)
+    return None
+
+
+async def send_branded(channel, e, kind='question', **kwargs):
+    picture = brand_file(e, kind)
+    if picture:
+        kwargs['file'] = picture
+    return await channel.send(embed=e, **kwargs)
+
+
+async def respond_branded(interaction, e, kind='leaderboard'):
+    picture = brand_file(e, kind)
+    if picture:
+        return await interaction.response.send_message(embed=e, file=picture)
+    return await interaction.response.send_message(embed=e)
+
+
+
+
+def branded_lobby_embed(description):
+    e = themed_embed('SS KNOWLEDGE SHOWDOWN  |  LOBBY', description)
+    e.set_image(url='attachment://lobby.png')
+    return e
 
 
 class LobbyView(discord.ui.View):
@@ -83,8 +210,8 @@ class LobbyView(discord.ui.View):
             return await interaction.response.send_message('Only hosts with Manage Server permission can start early.', ephemeral=True)
         if game.phase != 'lobby' or game.lobby_start.is_set():
             return await interaction.response.send_message('The lobby is already closed.', ephemeral=True)
-        if len(game.players) < 2:
-            return await interaction.response.send_message('At least 2 players must join before starting.', ephemeral=True)
+        if len(game.players) < MIN_PLAYERS:
+            return await interaction.response.send_message(f'At least {MIN_PLAYERS} player(s) must join before starting.', ephemeral=True)
         game.lobby_start.set()
         await interaction.response.send_message('🚀 Starting the quiz now!', ephemeral=True)
 
@@ -146,9 +273,9 @@ class Game:
     async def refresh_lobby(self):
         if self.lobby_message and self.phase == 'lobby':
             try:
-                await self.lobby_message.edit(embed=embed('🛡️ SS Knowledge Showdown',
+                await self.lobby_message.edit(embed=branded_lobby_embed(
                     f'**Players:** {len(self.players)}/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
-                    f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n\n'
+                    f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n**Test mode:** {MIN_PLAYERS} player minimum\n\n'
                     'Click **Join Quiz** to enter!'), view=LobbyView(self))
             except discord.HTTPException:
                 pass
@@ -171,8 +298,8 @@ class Game:
                 pass
             if self.phase == 'ended':
                 return
-            if len(self.players) < 2:
-                await self.channel.send('Quiz cancelled: at least 2 players are required.')
+            if len(self.players) < MIN_PLAYERS:
+                await self.channel.send(f'Quiz cancelled: at least {MIN_PLAYERS} player(s) required.')
                 return
             self.phase = 'playing'
             if self.lobby_message:
@@ -187,7 +314,7 @@ class Game:
                 if self.phase == 'ended':
                     return
                 if i % 5 == 0:
-                    await self.channel.send(embed=self.leaderboard())
+                    await send_branded(self.channel, self.leaderboard(), 'leaderboard')
                 if i < len(self.questions) and not await self.wait_or_end(INTERMISSION_SECONDS):
                     return
             await self.finish()
@@ -209,7 +336,7 @@ class Game:
         self.active_view = view
         title = f'⚔️ Tiebreaker {number}' if tie else f'❓ Question {number}/{len(self.questions)}'
         options = '\n'.join(f'**{chr(65+i)}.** {opt}' for i, opt in enumerate(question['options']))
-        message = await self.channel.send(embed=embed(title, f"**{question['question']}**\n\n{options}\n\n⏳ {seconds} seconds to answer"), view=view)
+        message = await send_branded(self.channel, embed(title, f"**{question['question']}**\n\n{options}\n\n⏳ {seconds} seconds to answer"), 'tiebreaker' if tie else 'question', view=view)
         self.active_message = message
         await asyncio.sleep(seconds)
         await view.close(message)
@@ -247,7 +374,10 @@ class Game:
         # Resolve ties affecting the top three places; unrelated ties retain shared ranks.
         final_order = []
         tie_pool = [q for q in load_questions() if q not in self.questions]
+        with db_connect() as conn:
+            used = {r[0] for r in conn.execute('SELECT question_id FROM used_questions WHERE guild_id=?', (self.channel.guild.id,))}
         random.shuffle(tie_pool)
+        tie_pool.sort(key=lambda q: question_id(q) in used)
         for score in ranked_scores:
             tied = [uid for uid, value in self.scores.items() if value == score]
             if len(final_order) >= 3:
@@ -261,7 +391,9 @@ class Game:
         medals = ['🥇', '🥈', '🥉']
         lines = [f'{medals[i] if i < 3 else f"{i+1}."} <@{uid}> — **{self.scores[uid]} pts**'
                  for i, uid in enumerate(final_order)]
-        await self.channel.send(embed=embed('🏆 SS KNOWLEDGE SHOWDOWN — FINAL RESULTS', '\n'.join(lines), discord.Color.gold()))
+        save_round(self, final_order)
+        await send_branded(self.channel, embed('🏆 SS KNOWLEDGE SHOWDOWN — FINAL RESULTS', '\n'.join(lines), discord.Color.gold()), 'results')
+        await self.channel.send('📚 Previous results: `/quiz-history` · All-time scores: `/quiz-records`')
 
     async def resolve_tie(self, tied, score, pool):
         mentions = ' '.join(f'<@{uid}>' for uid in tied)
@@ -280,7 +412,9 @@ class Game:
                 break
             round_no += 1
             await self.pause_gate.wait()
-            correct = await self.ask(pool.pop(), round_no, True, survivors)
+            tie_question = pool.pop(0)
+            mark_used(self.channel.guild.id, [tie_question])
+            correct = await self.ask(tie_question, round_no, True, survivors)
             if not correct:
                 await self.channel.send('Nobody answered correctly — all players remain!')
             elif len(correct) == len(survivors):
@@ -304,9 +438,7 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
     game = games.get(interaction.guild.id)
     command = action.value
     if command == 'leaderboard':
-        if not game:
-            return await interaction.response.send_message('No quiz is running.', ephemeral=True)
-        return await interaction.response.send_message(embed=game.leaderboard())
+        return await respond_branded(interaction, game.leaderboard() if game else past_round_embed(interaction.guild.id))
     if not host_only(interaction):
         return await interaction.response.send_message('Only members with Manage Server permission can host quizzes.', ephemeral=True)
     if command == 'start':
@@ -319,16 +451,13 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
         targets = {'easy': 2, 'medium': 9, 'hard': 14}
         if any(len(groups[level]) < count for level, count in targets.items()):
             return await interaction.response.send_message('Question bank needs at least 2 easy, 9 medium and 14 hard questions.', ephemeral=True)
-        chosen = []
-        for level, count in targets.items():
-            chosen.extend(random.sample(groups[level], count))
-        random.shuffle(chosen)
+        chosen = select_questions(interaction.guild.id, bank)
         game = Game(interaction.channel, interaction.user.id, chosen)
         games[interaction.guild.id] = game
         await interaction.response.send_message('Quiz lobby created!', ephemeral=True)
-        game.lobby_message = await interaction.channel.send(embed=embed('🛡️ SS Knowledge Showdown',
+        game.lobby_message = await send_branded(interaction.channel, branded_lobby_embed(
             f'**Players:** 0/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
-            f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n\nClick **Join Quiz** to enter!'), view=LobbyView(game))
+            f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n\nClick **Join Quiz** to enter!'), 'lobby', view=LobbyView(game))
         game.task = asyncio.create_task(game.run())
         return
     if not game:
@@ -354,6 +483,26 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
         return await interaction.response.send_message('Skipping is not enabled in this version, to avoid unfairly shortening an active question.', ephemeral=True)
 
 
+@bot.tree.command(name='quiz-history', description='View a completed quiz round, or the latest results')
+@app_commands.describe(round_number='Optional round ID shown on the results')
+async def quiz_history(interaction: discord.Interaction, round_number: int | None = None):
+    if not interaction.guild:
+        return await interaction.response.send_message('Use this command in a server.', ephemeral=True)
+    await respond_branded(interaction, past_round_embed(interaction.guild.id, round_number), 'results')
+
+
+@bot.tree.command(name='quiz-records', description='All-time quiz leaderboard across completed games')
+async def quiz_records(interaction: discord.Interaction):
+    if not interaction.guild:
+        return await interaction.response.send_message('Use this command in a server.', ephemeral=True)
+    await respond_branded(interaction, records_embed(interaction.guild.id), 'leaderboard')
+
+
+@bot.event
+async def on_ready():
+    print(f'Logged in as {bot.user}')
+
+
 async def setup_hook():
     if GUILD_ID:
         guild = discord.Object(id=GUILD_ID)
@@ -362,20 +511,17 @@ async def setup_hook():
     else:
         await bot.tree.sync()
 
+
 bot.setup_hook = setup_hook
+
 
 async def main():
     if not TOKEN:
         raise RuntimeError('Set DISCORD_TOKEN in your environment.')
+    db_connect().close()
     async with bot:
         await bot.start(TOKEN)
 
 
-@bot.event
-async def on_ready():
-    print(f'Logged in as {bot.user}')
-
-
 if __name__ == '__main__':
     asyncio.run(main())
-  
