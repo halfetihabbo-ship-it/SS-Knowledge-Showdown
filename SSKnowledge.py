@@ -133,7 +133,7 @@ GOLD = discord.Color.from_rgb(194, 165, 105)
 def themed_embed(title, description='', color=None):
     e = discord.Embed(title=title, description=description, color=color or SILVER)
     e.set_author(name='SECRET SERVICE  |  KNOWLEDGE SHOWDOWN')
-    e.set_footer(text='SS Knowledge Showdown  •  Official Quiz')
+    e.set_footer(text='Secret Service Knowledge Showdown  •  Official Quiz')
     if SS_LOGO_URL.startswith(('https://', 'http://')):
         e.set_thumbnail(url=SS_LOGO_URL)
     return e
