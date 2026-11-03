@@ -134,8 +134,6 @@ def themed_embed(title, description='', color=None):
     e = discord.Embed(title=title, description=description, color=color or SILVER)
     e.set_author(name='SECRET SERVICE  |  KNOWLEDGE SHOWDOWN')
     e.set_footer(text='Secret Service Knowledge Showdown  •  Official Quiz')
-    if SS_LOGO_URL.startswith(('https://', 'http://')):
-        e.set_thumbnail(url=SS_LOGO_URL)
     return e
 
 
@@ -152,8 +150,9 @@ def brand_file(e, kind='question', quiz_key='secret_service'):
     if not path.is_file():
         path = Path(__file__).parent / name
     if path.is_file():
-        e.set_image(url=f'attachment://{name}')
-        return discord.File(path, filename=name)
+        unique_name = f'{quiz_key}_{name}'
+        e.set_image(url=f'attachment://{unique_name}')
+        return discord.File(path, filename=unique_name)
     return None
 
 
@@ -186,8 +185,8 @@ def status_embed(title, message, highlight=False):
 
 def branded_lobby_embed(description, quiz_key='secret_service'):
     e = themed_embed(f'{QUIZ_NAMES[quiz_key]} | Lobby', description)
-    # Keep the original attachment image when the lobby is edited.
-    e.set_image(url='attachment://lobby.png')
+    # The lobby image is assigned by brand_file on first send.
+    e.set_image(url=f'attachment://{quiz_key}_lobby.png')
     return e
 
 
@@ -296,7 +295,7 @@ class Game:
                 await self.lobby_message.edit(embed=branded_lobby_embed(
                     f'**Players:** {len(self.players)}/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
                     f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n**Test mode:** {MIN_PLAYERS} player minimum\n\n'
-                    'Click **Join Quiz** to enter!', self.quiz_key), view=LobbyView(self))
+                    'Click **Join Quiz** to enter!', self.quiz_key), view=LobbyView(self), attachments=self.lobby_message.attachments)
             except discord.HTTPException:
                 pass
 
