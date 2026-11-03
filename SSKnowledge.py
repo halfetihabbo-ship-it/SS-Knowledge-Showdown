@@ -3,6 +3,7 @@ import json
 import os
 import random
 import sqlite3
+import time
 import hashlib
 from datetime import datetime, timezone
 from collections import defaultdict
@@ -16,7 +17,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID', '0'))
 # Only these two Discord accounts may manage quizzes.
 HOST_IDS = {1501587787294703657, 1204163177793720331}
-SS_QUIZ_ROLE_ID = 1567139397285978122
+SS_QUIZ_ROLE_ID = 1557709898706329642
 ROLE_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(id=SS_QUIZ_ROLE_ID)])
 MAX_PLAYERS = 50
 QUESTION_COUNT = 25
@@ -244,22 +245,32 @@ class AnswerView(discord.ui.View):
         self.question = question
         self.eligible = set(eligible)
         self.answers = {}
-        self.answer_order = []  # Accepted button presses in server processing order
+        # First valid interaction per user: (monotonic arrival ns, interaction id, choice).
+        # This measures bot receipt, not the physical click at the player's device.
+        self.answer_receipts = {}
+        self.started_ns = None
+        self.deadline_ns = None
         self.open = True
         self.lock = asyncio.Lock()
         for index, option in enumerate(question['options']):
             button = discord.ui.Button(label=f'{chr(65 + index)}. {option}', style=discord.ButtonStyle.primary, row=index // 2)
             async def callback(interaction, choice=index):
+                # Timestamp before acquiring the lock or performing any Discord API calls.
+                received_ns = time.monotonic_ns()
                 async with self.lock:
-                    if not self.open or self.game.phase == 'ended':
-                        return await private_notice(interaction, 'This question is closed.', success=False)
-                    if interaction.user.id not in self.eligible:
-                        return await private_notice(interaction, 'You are not eligible for this question.', success=False)
-                    if interaction.user.id in self.answers:
-                        return await private_notice(interaction, 'Your answer is already locked.', success=False)
-                    self.answers[interaction.user.id] = choice
-                    self.answer_order.append(interaction.user.id)
-                    await private_notice(interaction, 'Answer locked in. Your selection is private.', success=True)
+                    if (not self.open or self.game.phase == 'ended'
+                            or self.started_ns is None or received_ns >= self.deadline_ns):
+                        notice = ('This question is closed.', False)
+                    elif interaction.user.id not in self.eligible:
+                        notice = ('You are not eligible for this question.', False)
+                    elif interaction.user.id in self.answers:
+                        notice = ('Your answer is already locked.', False)
+                    else:
+                        self.answers[interaction.user.id] = choice
+                        self.answer_receipts[interaction.user.id] = (received_ns, interaction.id, choice)
+                        notice = ('Answer locked in. Your selection is private.', True)
+                # Acknowledge outside the lock so network delays cannot block other clicks.
+                await private_notice(interaction, notice[0], success=notice[1])
             button.callback = callback
             self.add_item(button)
 
@@ -362,23 +373,39 @@ class Game:
         options = '\n'.join(f'**{chr(65+i)}.** {opt}' for i, opt in enumerate(question['options']))
         message = await send_branded(self.channel, embed(title, f"**{question['question']}**\n\n{options}\n\n⏳ {seconds} seconds to answer"), 'tiebreaker' if tie else 'question', quiz_key=self.quiz_key, view=view)
         self.active_message = message
+        # Begin the countdown after Discord confirms the question message was sent.
+        view.started_ns = time.monotonic_ns()
+        view.deadline_ns = view.started_ns + seconds * 1_000_000_000
         await asyncio.sleep(seconds)
         await view.close(message)
         if self.phase == 'ended':
             return set()
         correct = {uid for uid, answer in view.answers.items() if answer == question['answer']}
+        # Sort by receipt time, then Discord's unique interaction ID for stable ties.
+        correct_in_order = sorted(correct, key=lambda uid: view.answer_receipts[uid][:2])
         if not tie:
-            # Only correct answers earn points. Ranking uses the order in which
-            # button interactions were accepted, never the option's position.
-            correct_in_order = [uid for uid in view.answer_order if uid in correct]
             for place, uid in enumerate(correct_in_order):
-                points = (4, 3, 2)[place] if place < 3 else 1
-                self.scores[uid] += points
+                self.scores[uid] += (4, 3, 2)[place] if place < 3 else 1
+
         letter = chr(65 + question['answer'])
+        fastest_lines = []
+        medals = ('🥇', '🥈', '🥉')
+        for place, uid in enumerate(correct_in_order[:3]):
+            received_ns = view.answer_receipts[uid][0]
+            elapsed = max(0.0, (received_ns - view.started_ns) / 1_000_000_000)
+            name = discord.utils.escape_markdown(self.players.get(uid, str(uid)))
+            points = '' if tie else f'  •  **+{(4, 3, 2)[place]} pts**'
+            fastest_lines.append(f'{medals[place]} **{name}** — **{elapsed:.2f}s**{points}')
+        fastest_text = '\n'.join(fastest_lines) if fastest_lines else 'No correct answers this question.'
+        other_correct = max(0, len(correct_in_order) - 3)
+        scoring_text = ('' if tie else
+            f'\n**Other correct answers:** {other_correct} player(s) earned **+1 point**.\n'
+            '**Scoring:** Fastest correct = 4 pts, second = 3, third = 2, remaining = 1.')
         await self.channel.send(embed=embed('Answer Revealed',
-            f"**{letter}. {question['options'][question['answer']]}**\n"
-            f"Correct players: **{len(correct)}/{len(eligible)}**\n"
-            f"⚡ Speed-Based Scoring: Fastest correct answer earns 4 points, followed by 3, then 2. All remaining correct answers earn 1 point.", GOLD))
+            f"**Correct answer:** {letter}. {question['options'][question['answer']]}\n"
+            f"**Correct players:** {len(correct)}/{len(eligible)}\n\n"
+            f"⚡ **Fastest Correct Answers**\n{fastest_text}"
+            f"{scoring_text}", GOLD))
         self.active_view = None
         self.active_message = None
         return correct
@@ -642,15 +669,6 @@ async def update_quiz_role(payload, add):
         if member.bot:
             return
         if add:
-            print(f"Guild: {guild.name} ({guild.id})")
-            print(f"Bot: {guild.me} ({guild.me.id})")
-            print(f"Bot top role: {guild.me.top_role.name} ({guild.me.top_role.position})")
-            print(f"Manage Roles: {guild.me.guild_permissions.manage_roles}")
-            print(f"Target role: {role.name} ({role.id})")
-            print(f"Target role position: {role.position}")
-            print(f"Target role managed: {role.managed}")
-            print(f"Can manage role: {guild.me.top_role > role}")
-            print(f"Target member: {member} ({member.id})")
             await member.add_roles(role, reason='Reacted to the SS Quiz role panel')
         else:
             await member.remove_roles(role, reason='Removed reaction from the SS Quiz role panel')
