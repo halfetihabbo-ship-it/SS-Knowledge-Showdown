@@ -16,7 +16,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID', '0'))
 # Only these two Discord accounts may manage quizzes.
 HOST_IDS = {1501587787294703657, 1204163177793720331}
-SS_QUIZ_ROLE_ID = 1557709898706329642
+SS_QUIZ_ROLE_ID = 1567139397285978122
 ROLE_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(id=SS_QUIZ_ROLE_ID)])
 MAX_PLAYERS = 50
 QUESTION_COUNT = 25
