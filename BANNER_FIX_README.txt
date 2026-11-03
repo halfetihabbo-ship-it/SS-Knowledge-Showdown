@@ -1,0 +1,1 @@
+Fixed source-image row bleed on all 15 banners. All banners 1100x220. Replaced SSKnowledge.py with your uploaded version, disabled duplicate thumbnail, and retained lobby attachment when edited. Upload SSKnowledge.py and all three theme subfolders under assets/.
