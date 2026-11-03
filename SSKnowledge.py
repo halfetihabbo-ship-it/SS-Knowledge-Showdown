@@ -448,7 +448,8 @@ class Game:
             if time.monotonic_ns() >= view.deadline_ns:
                 break
             await asyncio.sleep(min(0.15, max(0.01, (view.deadline_ns - time.monotonic_ns()) / 1e9)))
-        await view.close(message)
+        # Resume may repost the question; close the currently visible message.
+        await view.close(self.active_message or message)
         if self.phase == 'ended':
             return set()
         if self.replacement_question is not None:
@@ -722,31 +723,56 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
     if command == 'resume':
         if not game.paused:
             return await private_notice(interaction, 'The quiz is not paused.', success=False)
+        # A replacement is queued for the question loop; never repost the void question.
+        replacing = game.replacement_question is not None
         active = game.active_view
-        live_question = bool(active and active.open and game.active_message and game.current_question is not None)
-        # Keep the game paused while Discord edits and sends the announcement.
-        # No answer window is consumed by network latency.
-        if live_question:
-            try:
-                await game.active_message.edit(embed=compact_question_embed(
+        live_question = bool(not replacing and active and active.open and game.active_message
+                             and game.current_question is not None)
+        # Acknowledge the command immediately; Discord message operations can take
+        # longer than the three-second interaction response window.
+        await interaction.response.defer(ephemeral=True)
+        try:
+            if live_question:
+                # Remove the old interactive buttons. Reusing the existing message
+                # causes clients to display a stale question/countdown on resume.
+                old_message = game.active_message
+                await old_message.edit(view=None)
+                await game.channel.send(embed=status_embed('▶️ Quiz Resuming',
+                    'A fresh copy of the question is being posted. Wait for the new answer buttons.', True))
+                new_embed = compact_question_embed(
                     game.quiz_key, game.current_question, game.current_question_number,
                     len(game.questions), ANSWER_SECONDS,
-                    tie=game.phase == 'tiebreaker', deadline=None))
-            except discord.HTTPException:
-                pass
-        await game.channel.send(embed=status_embed('▶️ Quiz Resumed',
-            'The host has resumed the quiz. Active questions receive a fresh 15-second answer window.', True))
-        # Restart the clock only AFTER the messages have been delivered. A fresh
-        # window avoids losing time to slow Discord clients or message loading.
-        if live_question and active is game.active_view and active.open:
-            now_ns = time.monotonic_ns()
-            active.started_ns = now_ns
-            active.deadline_ns = now_ns + ANSWER_SECONDS * 1_000_000_000
-        game.pause_started_ns = None
-        game.paused = False
-        game.pause_gate.set()
-        return await private_notice(interaction,
-            'Quiz resumed. Active question timer reset to a full 15 seconds.', success=True)
+                    tie=game.phase == 'tiebreaker', deadline=None)
+                new_message = await game.channel.send(embed=new_embed, view=active)
+                # The timer is NOT restarted until Discord acknowledges delivery
+                # of the new question. A short grace period gives clients time to render.
+                game.active_message = new_message
+                now_ns = time.monotonic_ns()
+                active.started_ns = now_ns
+                active.deadline_ns = now_ns + (ANSWER_SECONDS + 3) * 1_000_000_000
+                # Show a countdown for the real deadline, not the earlier send time.
+                deadline = math.ceil(time.time() + ANSWER_SECONDS + 3)
+                try:
+                    await new_message.edit(embed=compact_question_embed(
+                        game.quiz_key, game.current_question, game.current_question_number,
+                        len(game.questions), ANSWER_SECONDS + 3,
+                        tie=game.phase == 'tiebreaker', deadline=deadline))
+                except discord.HTTPException:
+                    pass
+            else:
+                await game.channel.send(embed=status_embed('▶️ Quiz Resumed',
+                    'The quiz is continuing.', True))
+            game.pause_started_ns = None
+            game.paused = False
+            game.pause_gate.set()
+            await interaction.followup.send(
+                'Quiz resumed. ' + ('A fresh question message has been posted with an 18-second window.'
+                                    if live_question else 'The quiz will continue.'), ephemeral=True)
+        except discord.HTTPException as exc:
+            # Keep the quiz safely paused instead of silently consuming time.
+            await interaction.followup.send(
+                f'Could not repost the question; quiz remains paused. Discord error: {exc}', ephemeral=True)
+        return
 
 
 # Operational safeguards and event-day controls.
