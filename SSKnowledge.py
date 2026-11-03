@@ -378,7 +378,7 @@ class Game:
         await self.channel.send(embed=embed('Answer Revealed',
             f"**{letter}. {question['options'][question['answer']]}**\n"
             f"Correct players: **{len(correct)}/{len(eligible)}**\n"
-            f"Points awarded: **4** to 1st, **3** to 2nd, **2** to 3rd, **1** to remaining correct answers.", GOLD))
+            f"⚡ Speed-Based Scoring: Fastest correct answer earns 4 points, followed by 3, then 2. All remaining correct answers earn 1 point.", GOLD))
         self.active_view = None
         self.active_message = None
         return correct
