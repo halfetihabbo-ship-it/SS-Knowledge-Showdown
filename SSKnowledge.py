@@ -597,6 +597,146 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
         return await private_notice(interaction, 'Skipping is not enabled in this version, to avoid unfairly shortening an active question.', success=False)
 
 
+# Isolated host-only tiebreaker testing; never writes scores or question usage to SQLite.
+tiebreaker_tests = {}
+TEST_JOIN_SECONDS = 30
+TEST_READY_SECONDS = 10
+
+
+class TestTiebreakerJoinView(discord.ui.View):
+    def __init__(self, session):
+        super().__init__(timeout=None)
+        self.session = session
+
+    @discord.ui.button(label='Join Test', style=discord.ButtonStyle.primary)
+    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
+        session = self.session
+        if not session['joining']:
+            return await private_notice(interaction, 'Test registration has closed.')
+        if interaction.user.id in session['players']:
+            return await private_notice(interaction, 'You have already joined this test.')
+        if len(session['players']) >= MAX_PLAYERS:
+            return await private_notice(interaction, 'The test is full.')
+        session['players'][interaction.user.id] = interaction.user.display_name
+        await private_notice(interaction, 'You are registered for the tiebreaker test.', True)
+
+
+async def run_tiebreaker_test(channel, session):
+    guild_id = channel.guild.id
+    game = None
+    try:
+        await asyncio.sleep(TEST_JOIN_SECONDS)
+        session['joining'] = False
+        if len(session['players']) < 2:
+            await channel.send(embed=status_embed('Test Cancelled', 'At least two players must join the tiebreaker test.'))
+            return
+        # An isolated Game instance reuses the real question buttons and answer evaluation.
+        # It is deliberately not added to `games` and never calls finish() or save_round().
+        pool = load_tiebreaker_questions('general_knowledge')
+        random.shuffle(pool)
+        game = Game(channel, session['host_id'], [], 'general_knowledge')
+        game.players = dict(session['players'])
+        game.scores = {uid: 0 for uid in game.players}
+        game.phase = 'tiebreaker'
+        session['game'] = game
+        await channel.send(embed=themed_embed(
+            '🧪 General Knowledge | Tiebreaker Test',
+            f'**Participants:** {len(game.players)}\n'
+            f'**Preparation:** {TEST_READY_SECONDS} seconds\n'
+            f'**Answer window:** {ANSWER_SECONDS} seconds per question\n\n'
+            'This is a practice session. Scores, records and used-question history will not be changed.',
+            ROUND_STYLE['general_knowledge'][1]))
+        await asyncio.sleep(TEST_READY_SECONDS)
+        survivors = list(game.players)
+        eliminated = []
+        round_no = 0
+        while len(survivors) > 1 and pool and not session['cancelled']:
+            round_no += 1
+            question = pool.pop()
+            correct = await game.ask(question, round_no, True, survivors)
+            if session['cancelled']:
+                break
+            if not correct:
+                msg = 'Nobody answered correctly; all participants remain.'
+            elif len(correct) == len(survivors):
+                msg = 'Everyone answered correctly; all participants remain.'
+            else:
+                knocked_out = [uid for uid in survivors if uid not in correct]
+                eliminated = knocked_out + eliminated
+                survivors = [uid for uid in survivors if uid in correct]
+                msg = f'**Remaining:** {", ".join(discord.utils.escape_markdown(game.players[uid]) for uid in survivors)}'
+            await channel.send(embed=themed_embed('🧪 Test | Sudden Death Result', msg, ROUND_STYLE['general_knowledge'][1]))
+            if len(survivors) > 1:
+                await asyncio.sleep(INTERMISSION_SECONDS)
+        if not session['cancelled']:
+            if len(survivors) == 1:
+                msg = f'**Winner:** {discord.utils.escape_markdown(game.players[survivors[0]])}\nQuestions used: {round_no}'
+            else:
+                msg = f'No single winner after {round_no} questions. The test question bank was exhausted.'
+            await channel.send(embed=themed_embed('🧪 Tiebreaker Test Complete', msg + '\n\nNo official scores or records were saved.', ROUND_STYLE['general_knowledge'][1]))
+    except asyncio.CancelledError:
+        session['cancelled'] = True
+        raise
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        await channel.send(embed=status_embed('Test Error', 'The test encountered an error. Check the Railway logs.'))
+    finally:
+        session['joining'] = False
+        if game:
+            game.phase = 'ended'
+            if game.active_view and game.active_message:
+                await game.active_view.close(game.active_message)
+        if tiebreaker_tests.get(guild_id) is session:
+            tiebreaker_tests.pop(guild_id, None)
+
+
+@bot.tree.command(name='quiz-test-tiebreaker', description='Host-only: run an isolated General Knowledge tiebreaker test')
+async def quiz_test_tiebreaker(interaction: discord.Interaction):
+    if not host_only(interaction):
+        return await private_notice(interaction, 'Only authorised quiz hosts can start this test.')
+    guild_id = interaction.guild.id
+    if guild_id in tiebreaker_tests:
+        return await private_notice(interaction, 'A tiebreaker test is already active in this server.')
+    if guild_id in games:
+        return await private_notice(interaction, 'Finish the live quiz before starting a test.')
+    try:
+        load_tiebreaker_questions('general_knowledge')
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return await private_notice(interaction, f'Tiebreaker question bank error: {exc}')
+    session = {'host_id': interaction.user.id, 'players': {}, 'joining': True, 'cancelled': False, 'game': None, 'task': None}
+    tiebreaker_tests[guild_id] = session
+    await interaction.response.send_message('Starting the isolated tiebreaker test...', ephemeral=True)
+    try:
+        await interaction.channel.send(
+            embed=themed_embed('🧪 Tiebreaker Test Lobby',
+                f'**General Knowledge** • Join within **{TEST_JOIN_SECONDS} seconds**.\n'
+                'At least two participants required.\n'
+                f'Then **{TEST_READY_SECONDS}s preparation** and **{ANSWER_SECONDS}s per question**.\n'
+                'This test will not affect official quiz scores or history.', ROUND_STYLE['general_knowledge'][1]),
+            view=TestTiebreakerJoinView(session))
+        session['task'] = asyncio.create_task(run_tiebreaker_test(interaction.channel, session))
+    except Exception:
+        tiebreaker_tests.pop(guild_id, None)
+        raise
+
+
+@bot.tree.command(name='quiz-stop-tiebreaker-test', description='Host-only: stop an active tiebreaker test')
+async def quiz_stop_tiebreaker_test(interaction: discord.Interaction):
+    if not host_only(interaction):
+        return await private_notice(interaction, 'Only authorised quiz hosts can stop this test.')
+    session = tiebreaker_tests.get(interaction.guild.id)
+    if not session:
+        return await private_notice(interaction, 'No tiebreaker test is active.')
+    session['cancelled'] = True
+    session['joining'] = False
+    if session['task']:
+        session['task'].cancel()
+    else:
+        tiebreaker_tests.pop(interaction.guild.id, None)
+    await private_notice(interaction, 'Tiebreaker test stopped.', True)
+
+
 @bot.tree.command(name='quiz-history', description='View a completed quiz round, or the latest results')
 @app_commands.describe(round_number='Optional round ID shown on the results')
 async def quiz_history(interaction: discord.Interaction, round_number: int | None = None):
