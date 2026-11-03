@@ -23,7 +23,7 @@ ROLE_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=[disc
 MAX_PLAYERS = 50
 QUESTION_COUNT = 25
 ANSWER_SECONDS = 15
-MIN_PLAYERS = 2
+MIN_PLAYERS = 1  # Solo testing enabled; set to 2 to require multiple players
 LOBBY_SECONDS = 600
 INTERMISSION_SECONDS = 7
 TIE_READY_SECONDS = 120
