@@ -1,0 +1,252 @@
+[
+  {
+    "question": "Which country has the most time zones when its overseas territories are included?",
+    "options": [
+      "Russia",
+      "United States",
+      "France",
+      "China"
+    ],
+    "answer": 2
+  },
+  {
+    "question": "What is the chemical symbol for tungsten?",
+    "options": [
+      "T",
+      "W",
+      "Tg",
+      "Tu"
+    ],
+    "answer": 1
+  },
+  {
+    "question": "In which year did the Berlin Wall fall?",
+    "options": [
+      "1987",
+      "1991",
+      "1985",
+      "1989"
+    ],
+    "answer": 3
+  },
+  {
+    "question": "Which planet has the shortest day in our solar system?",
+    "options": [
+      "Jupiter",
+      "Saturn",
+      "Neptune",
+      "Mars"
+    ],
+    "answer": 0
+  },
+  {
+    "question": "Who wrote the novel 1984?",
+    "options": [
+      "Aldous Huxley",
+      "George Orwell",
+      "H. G. Wells",
+      "Ray Bradbury"
+    ],
+    "answer": 1
+  },
+  {
+    "question": "What is the capital city of New Zealand?",
+    "options": [
+      "Auckland",
+      "Christchurch",
+      "Wellington",
+      "Hamilton"
+    ],
+    "answer": 2
+  },
+  {
+    "question": "Which element has the atomic number 79?",
+    "options": [
+      "Silver",
+      "Platinum",
+      "Copper",
+      "Gold"
+    ],
+    "answer": 3
+  },
+  {
+    "question": "Which ancient civilisation built Machu Picchu?",
+    "options": [
+      "Aztec",
+      "Inca",
+      "Maya",
+      "Olmec"
+    ],
+    "answer": 1
+  },
+  {
+    "question": "What is the largest internal organ in the human body?",
+    "options": [
+      "Liver",
+      "Heart",
+      "Lungs",
+      "Kidneys"
+    ],
+    "answer": 0
+  },
+  {
+    "question": "Which country gifted the Statue of Liberty to the United States?",
+    "options": [
+      "Spain",
+      "Italy",
+      "France",
+      "Germany"
+    ],
+    "answer": 2
+  },
+  {
+    "question": "What is the smallest prime number greater than 100?",
+    "options": [
+      "103",
+      "101",
+      "107",
+      "109"
+    ],
+    "answer": 1
+  },
+  {
+    "question": "Which scientist formulated the three laws of motion?",
+    "options": [
+      "Albert Einstein",
+      "Galileo Galilei",
+      "Nikola Tesla",
+      "Isaac Newton"
+    ],
+    "answer": 3
+  },
+  {
+    "question": "Which country was formerly known as Ceylon?",
+    "options": [
+      "Myanmar",
+      "Bangladesh",
+      "Sri Lanka",
+      "Nepal"
+    ],
+    "answer": 2
+  },
+  {
+    "question": "What is the name of the deepest known point in Earth's oceans?",
+    "options": [
+      "Challenger Deep",
+      "Puerto Rico Trench",
+      "Java Trench",
+      "Tonga Trench"
+    ],
+    "answer": 0
+  },
+  {
+    "question": "Who painted The Persistence of Memory, famous for its melting clocks?",
+    "options": [
+      "Pablo Picasso",
+      "Salvador Dalí",
+      "Claude Monet",
+      "Vincent van Gogh"
+    ],
+    "answer": 1
+  },
+  {
+    "question": "Which language has the most native speakers worldwide?",
+    "options": [
+      "English",
+      "Spanish",
+      "Hindi",
+      "Mandarin Chinese"
+    ],
+    "answer": 3
+  },
+  {
+    "question": "In computing, what does CPU stand for?",
+    "options": [
+      "Central Processing Unit",
+      "Computer Processing Utility",
+      "Central Programming Unit",
+      "Core Processing Utility"
+    ],
+    "answer": 0
+  },
+  {
+    "question": "Which treaty formally ended the state of war between Germany and the Allied Powers after World War I?",
+    "options": [
+      "Treaty of Paris",
+      "Treaty of Utrecht",
+      "Treaty of Versailles",
+      "Treaty of Tordesillas"
+    ],
+    "answer": 2
+  },
+  {
+    "question": "Which musical instrument traditionally has 47 strings and seven pedals in its concert grand form?",
+    "options": [
+      "Harpsichord",
+      "Concert harp",
+      "Grand piano",
+      "Classical guitar"
+    ],
+    "answer": 1
+  },
+  {
+    "question": "What is the square root of 1,296?",
+    "options": [
+      "34",
+      "38",
+      "32",
+      "36"
+    ],
+    "answer": 3
+  },
+  {
+    "question": "Which country is home to the ancient city of Petra?",
+    "options": [
+      "Jordan",
+      "Egypt",
+      "Greece",
+      "Turkey"
+    ],
+    "answer": 0
+  },
+  {
+    "question": "What is the SI unit of electrical resistance?",
+    "options": [
+      "Volt",
+      "Ampere",
+      "Ohm",
+      "Watt"
+    ],
+    "answer": 2
+  },
+  {
+    "question": "Which Shakespeare play features the characters Rosencrantz and Guildenstern?",
+    "options": [
+      "Macbeth",
+      "Hamlet",
+      "Othello",
+      "King Lear"
+    ],
+    "answer": 1
+  },
+  {
+    "question": "Which gas makes up approximately 78% of Earth's atmosphere?",
+    "options": [
+      "Oxygen",
+      "Carbon dioxide",
+      "Argon",
+      "Nitrogen"
+    ],
+    "answer": 3
+  },
+  {
+    "question": "Which mathematician is credited with introducing the equals sign (=) in 1557?",
+    "options": [
+      "Robert Recorde",
+      "René Descartes",
+      "Blaise Pascal",
+      "Leonhard Euler"
+    ],
+    "answer": 0
+  }
+]
