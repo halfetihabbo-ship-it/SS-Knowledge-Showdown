@@ -17,7 +17,7 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID', '0'))
 # Only these two Discord accounts may manage quizzes.
 HOST_IDS = {1501587787294703657, 1204163177793720331}
-SS_QUIZ_ROLE_ID = 1557709898706329642
+SS_QUIZ_ROLE_ID = 1567139397285978122
 ROLE_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(id=SS_QUIZ_ROLE_ID)])
 MAX_PLAYERS = 50
 QUESTION_COUNT = 25
@@ -159,6 +159,28 @@ def brand_file(e, kind='question', quiz_key='secret_service'):
         e.set_image(url=f'attachment://{unique_name}')
         return discord.File(path, filename=unique_name)
     return None
+
+
+# Compact question embeds: no full-width banners or fixed question numbers.
+ROUND_STYLE = {
+    'secret_service': ('🛡️', discord.Color.from_rgb(35, 79, 130)),
+    'autumn_thanksgiving': ('🍂', discord.Color.from_rgb(180, 109, 50)),
+    'general_knowledge': ('🧠', discord.Color.from_rgb(133, 100, 201)),
+}
+
+def compact_question_embed(quiz_key, question, number, total, seconds, tie=False):
+    icon, accent = ROUND_STYLE[quiz_key]
+    title = (f'⚡ SUDDEN DEATH | QUESTION {number}' if tie
+             else f'{icon} {QUIZ_NAMES[quiz_key]} | QUESTION {number:02d} / {total:02d}')
+    e = discord.Embed(
+        title=title,
+        description=f"### {question['question']}\n\n"
+                    + '\n'.join(f"**{chr(65+i)}.** {option}" for i, option in enumerate(question['options'])),
+        color=accent,
+    )
+    e.set_author(name='SECRET SERVICE  |  KNOWLEDGE SHOWDOWN')
+    e.set_footer(text=f'{seconds} seconds to answer  •  Select one button below  •  Answer locks on click')
+    return e
 
 
 async def send_branded(channel, e, kind='question', quiz_key='secret_service', **kwargs):
@@ -369,9 +391,12 @@ class Game:
         seconds = ANSWER_SECONDS
         view = AnswerView(self, question, eligible, seconds)
         self.active_view = view
-        title = f'SUDDEN DEATH  /  QUESTION {number}' if tie else f'QUESTION {number:02d} / {len(self.questions):02d}'
-        options = '\n'.join(f'**{chr(65+i)}.** {opt}' for i, opt in enumerate(question['options']))
-        message = await send_branded(self.channel, embed(title, f"**{question['question']}**\n\n{options}\n\n⏳ {seconds} seconds to answer"), 'tiebreaker' if tie else 'question', quiz_key=self.quiz_key, view=view)
+        # No question banner: a lightweight, round-coloured Discord embed.
+        # The question number is generated dynamically for every question.
+        question_embed = compact_question_embed(
+            self.quiz_key, question, number, len(self.questions), seconds, tie=tie
+        )
+        message = await self.channel.send(embed=question_embed, view=view)
         self.active_message = message
         # Begin the countdown after Discord confirms the question message was sent.
         view.started_ns = time.monotonic_ns()
@@ -595,6 +620,8 @@ async def quiz_role_panel(interaction: discord.Interaction):
     if role is None:
         return await private_notice(interaction, 'The SS Quiz role was not found in this server.')
     me = guild.me
+    if role.managed:
+        return await private_notice(interaction, 'The SS Quiz role is integration-managed. Please use a regular server role.')
     if me is None or not me.guild_permissions.manage_roles or role >= me.top_role:
         return await private_notice(interaction, 'Give the bot Manage Roles and move its highest role above SS Quiz.')
     await interaction.response.defer(ephemeral=True)
