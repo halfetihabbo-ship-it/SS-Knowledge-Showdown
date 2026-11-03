@@ -567,27 +567,42 @@ class QuizSelect(discord.ui.Select):
         super().__init__(placeholder='Choose a quiz to host...', options=options)
 
     async def callback(self, interaction: discord.Interaction):
+        # Acknowledge the dropdown immediately. Loading banks, opening SQLite,
+        # and sending a lobby can exceed Discord's 3-second interaction deadline.
+        await interaction.response.defer(ephemeral=True)
         if not host_only(interaction):
-            return await private_notice(interaction, 'Only hosts can start a quiz.')
+            return await interaction.followup.send('Only hosts can start a quiz.', ephemeral=True)
+        if not interaction.guild:
+            return await interaction.followup.send('Use this command in a server.', ephemeral=True)
         guild_id = interaction.guild.id
         if guild_id in games:
-            return await private_notice(interaction, 'A quiz is already active in this server.')
+            return await interaction.followup.send('A quiz is already active in this server.', ephemeral=True)
         quiz_key = self.values[0]
         try:
             bank = load_questions(quiz_key)
             chosen = select_questions(guild_id, bank)
+            game = Game(interaction.channel, interaction.user.id, chosen, quiz_key)
+            games[guild_id] = game
+            try:
+                game.lobby_message = await send_branded(interaction.channel, branded_lobby_embed(
+                    f'**Theme:** {QUIZ_NAMES[quiz_key]}\n**Players:** 0/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
+                    f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n\n'
+                    'Click **Join Quiz** to enter!', quiz_key), 'lobby', quiz_key=quiz_key, view=LobbyView(game),
+                    content=f'<@&{SS_QUIZ_ROLE_ID}> — **{QUIZ_NAMES[quiz_key]}** lobby is open! Join now.',
+                    allowed_mentions=ROLE_MENTIONS)
+            except Exception:
+                games.pop(guild_id, None)
+                raise
+            game.task = asyncio.create_task(game.run())
+            await interaction.followup.send(f'{QUIZ_NAMES[quiz_key]} lobby created!', ephemeral=True)
         except (ValueError, OSError, json.JSONDecodeError) as exc:
-            return await private_notice(interaction, f'Question bank error: {exc}')
-        game = Game(interaction.channel, interaction.user.id, chosen, quiz_key)
-        games[guild_id] = game
-        await private_notice(interaction, f'{QUIZ_NAMES[quiz_key]} lobby created!', success=True)
-        game.lobby_message = await send_branded(interaction.channel, branded_lobby_embed(
-            f'**Theme:** {QUIZ_NAMES[quiz_key]}\n**Players:** 0/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
-            f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n\n'
-            'Click **Join Quiz** to enter!', quiz_key), 'lobby', quiz_key=quiz_key, view=LobbyView(game),
-            content=f'<@&{SS_QUIZ_ROLE_ID}> — **{QUIZ_NAMES[quiz_key]}** lobby is open! Join now.',
-            allowed_mentions=ROLE_MENTIONS)
-        game.task = asyncio.create_task(game.run())
+            await interaction.followup.send(f'Question bank error: {exc}', ephemeral=True)
+        except Exception as exc:
+            import logging
+            logging.exception('Quiz lobby creation failed for category %s', quiz_key)
+            await interaction.followup.send(
+                f'Could not create the {QUIZ_NAMES[quiz_key]} lobby: {type(exc).__name__}: {exc}',
+                ephemeral=True)
 
 
 class QuizSelectView(discord.ui.View):
