@@ -722,30 +722,31 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
     if command == 'resume':
         if not game.paused:
             return await private_notice(interaction, 'The quiz is not paused.', success=False)
-        elapsed_ns = time.monotonic_ns() - game.pause_started_ns
         active = game.active_view
-        if active and active.open and active.deadline_ns is not None:
-            active.deadline_ns += elapsed_ns
-        # Release the pause BEFORE awaiting Discord network calls. Otherwise a
-        # slow message edit/send consumes the remaining time while the quiz
-        # still appears paused, leading to an immediate answer reveal.
-        game.pause_started_ns = None
-        game.paused = False
-        game.pause_gate.set()
-        await private_notice(interaction, 'Quiz resumed. The question timer continues from where it stopped.', success=True)
-        if active and active.open and active.deadline_ns is not None and game.active_message and game.current_question is not None:
-            remaining = max(0, (active.deadline_ns - time.monotonic_ns()) / 1e9)
-            deadline = math.ceil(time.time() + remaining)
+        live_question = bool(active and active.open and game.active_message and game.current_question is not None)
+        # Keep the game paused while Discord edits and sends the announcement.
+        # No answer window is consumed by network latency.
+        if live_question:
             try:
                 await game.active_message.edit(embed=compact_question_embed(
                     game.quiz_key, game.current_question, game.current_question_number,
                     len(game.questions), ANSWER_SECONDS,
-                    tie=game.phase == 'tiebreaker', deadline=deadline))
+                    tie=game.phase == 'tiebreaker', deadline=None))
             except discord.HTTPException:
                 pass
         await game.channel.send(embed=status_embed('▶️ Quiz Resumed',
-            'The host has resumed the quiz. The remaining question time is restored.', True))
-        return
+            'The host has resumed the quiz. Active questions receive a fresh 15-second answer window.', True))
+        # Restart the clock only AFTER the messages have been delivered. A fresh
+        # window avoids losing time to slow Discord clients or message loading.
+        if live_question and active is game.active_view and active.open:
+            now_ns = time.monotonic_ns()
+            active.started_ns = now_ns
+            active.deadline_ns = now_ns + ANSWER_SECONDS * 1_000_000_000
+        game.pause_started_ns = None
+        game.paused = False
+        game.pause_gate.set()
+        return await private_notice(interaction,
+            'Quiz resumed. Active question timer reset to a full 15 seconds.', success=True)
 
 
 # Operational safeguards and event-day controls.
