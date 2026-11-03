@@ -125,6 +125,21 @@ def load_questions(quiz_key):
     return valid
 
 
+def load_tiebreaker_questions(quiz_key):
+    path = QUESTION_DIR / f'{quiz_key}_tiebreakers.json'
+    data = json.loads(path.read_text(encoding='utf-8'))
+    valid = []
+    for item in data:
+        if (isinstance(item, dict) and isinstance(item.get('question'), str)
+                and isinstance(item.get('options'), list) and len(item['options']) == 4
+                and all(isinstance(x, str) and 0 < len(x) <= 80 for x in item['options'])
+                and isinstance(item.get('answer'), int) and 0 <= item['answer'] < 4):
+            valid.append(item)
+    if not valid:
+        raise ValueError(f'No valid tiebreaker questions in {path.name}')
+    return valid
+
+
 def host_only(interaction):
     return interaction.guild is not None and interaction.user.id in HOST_IDS
 
@@ -414,9 +429,17 @@ class Game:
         ranked_scores = sorted(set(self.scores.values()), reverse=True)
         # Resolve ties affecting the top three places; unrelated ties retain shared ranks.
         final_order = []
-        tie_pool = load_questions(self.quiz_key).copy()  # Reuse this theme's questions for tiebreakers if needed
+        # General Knowledge has a dedicated, non-repeating tiebreaker bank.
+        # Other rounds retain their existing tiebreaker behaviour.
+        if self.quiz_key == 'general_knowledge':
+            tie_pool = load_tiebreaker_questions(self.quiz_key)
+        else:
+            tie_pool = load_questions(self.quiz_key).copy()
         with db_connect() as conn:
             used = {r[0] for r in conn.execute('SELECT question_id FROM used_questions WHERE guild_id=?', (self.channel.guild.id,))}
+        if self.quiz_key == 'general_knowledge':
+            main_ids = {question_id(q) for q in self.questions}
+            tie_pool = [q for q in tie_pool if question_id(q) not in main_ids]
         random.shuffle(tie_pool)
         tie_pool.sort(key=lambda q: question_id(q) in used)
         for score in ranked_scores:
