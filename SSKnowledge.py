@@ -311,6 +311,17 @@ class AnswerView(discord.ui.View):
             pass
 
 
+def score_log_embed(game, limit=10):
+    events = game.score_events[-limit:]
+    blocks = []
+    for event in events:
+        title = f'Question {event["round"]}' if event['kind'] == 'question' else 'Manual adjustment'
+        blocks.append(f'**{title}**\n' + '\n'.join(event['lines']))
+    return discord.Embed(title=f'{QUIZ_NAMES[game.quiz_key]} | Private Score Logs',
+                         description=('\n\n'.join(blocks) or 'No scoring events yet.')[:3900],
+                         colour=discord.Colour.blurple())
+
+
 class Game:
     def __init__(self, channel, host_id, questions, quiz_key):
         self.channel = channel
@@ -319,6 +330,7 @@ class Game:
         self.questions = questions
         self.players = {}
         self.scores = {}
+        self.score_events = []  # Current-host-only per-question scoring and manual adjustments
         self.phase = 'lobby'
         self.lobby_start = asyncio.Event()
         self.paused = False
@@ -461,9 +473,15 @@ class Game:
         # Sort by receipt time, then Discord's unique interaction ID for stable ties.
         correct_in_order = sorted(correct, key=lambda uid: view.answer_receipts[uid][:2])
         if not tie:
+            awards = []
             for place, uid in enumerate(correct_in_order):
                 points = (4, 3, 2)[place] if place < 3 else 1
                 self.scores[uid] += points
+                awards.append((uid, points))
+            lines = [f'{self.players[uid]} (`{uid}`): +{points} pts → {self.scores[uid]} total'
+                     for uid, points in awards]
+            event = {'round': number, 'kind': 'question', 'lines': lines or ['No points awarded.']}
+            self.score_events.append(event)
 
         letter = chr(65 + question['answer'])
         scoring_text = ('' if tie else
@@ -675,9 +693,13 @@ class ReplacementSelectView(discord.ui.View):
 
 
 @bot.tree.command(name='quiz', description='SS quiz host commands')
-@app_commands.describe(action='Choose a quiz action')
-@app_commands.choices(action=[app_commands.Choice(name=x, value=x) for x in ('start', 'pause', 'resume', 'replace', 'leaderboard', 'end')])
-async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str]):
+@app_commands.describe(action='Choose a quiz action', last='Recent scoring events (logs only, 1–10)', player='Participant (adjust-score only)', points='Points to add or subtract (adjust-score only)', reason='Reason for score adjustment (adjust-score only)')
+@app_commands.choices(action=[app_commands.Choice(name=x, value=x) for x in ('start', 'pause', 'resume', 'replace', 'leaderboard', 'end', 'logs', 'adjust-score')])
+async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str],
+               last: app_commands.Range[int, 1, 10] = 5,
+               player: discord.Member | None = None,
+               points: app_commands.Range[int, -1000, 1000] | None = None,
+               reason: str | None = None):
     if not interaction.guild:
         return await private_notice(interaction, 'Use this command in a server.', success=False)
     game = games.get(interaction.guild.id)
@@ -694,6 +716,27 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
         return await interaction.response.send_message('Select which quiz you want to host:', view=QuizSelectView(), ephemeral=True)
     if not game:
         return await private_notice(interaction, 'No quiz is running.', success=False)
+    if command in ('logs', 'adjust-score'):
+        if interaction.user.id != game.host_id:
+            return await private_notice(interaction, 'Only the host who started this quiz can use scoring controls.', success=False)
+        if command == 'logs':
+            return await interaction.response.send_message(embed=score_log_embed(game, last), ephemeral=True)
+        if player is None or points is None or reason is None:
+            return await private_notice(interaction, 'For adjust-score, provide player, points and reason.', success=False)
+        if player.id not in game.players:
+            return await private_notice(interaction, 'That member is not registered in the current quiz.', success=False)
+        if points == 0:
+            return await private_notice(interaction, 'Enter a non-zero points adjustment.', success=False)
+        reason = reason.strip()
+        if not reason or len(reason) > 200:
+            return await private_notice(interaction, 'Provide a reason of 1–200 characters.', success=False)
+        previous = game.scores[player.id]
+        game.scores[player.id] = previous + points
+        line = (f'{game.players[player.id]} (`{player.id}`): {points:+d} pts '
+                f'({previous} → {game.scores[player.id]})\n'
+                f'By: {interaction.user.display_name} (`{interaction.user.id}`)\nReason: {discord.utils.escape_markdown(reason)}')
+        game.score_events.append({'round': game.round_number, 'kind': 'adjustment', 'lines': [line]})
+        return await interaction.response.send_message(f'Score updated privately: {line}', ephemeral=True)
     if command == 'end':
         game.phase = 'ended'
         game.pause_gate.set()
