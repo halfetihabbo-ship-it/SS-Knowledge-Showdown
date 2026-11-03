@@ -1,0 +1,277 @@
+[
+  {
+    "id": "atb01",
+    "question": "What pigment gives many autumn leaves their yellow colour?",
+    "options": [
+      "Anthocyanin",
+      "Chlorophyll",
+      "Carotenoids",
+      "Melanin"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "atb02",
+    "question": "What pigment can produce red and purple colours in autumn leaves?",
+    "options": [
+      "Anthocyanins",
+      "Carotenoids",
+      "Chlorophyll",
+      "Keratin"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "atb03",
+    "question": "What happens to daylight hours in the UK as autumn progresses?",
+    "options": [
+      "They gradually shorten",
+      "They gradually lengthen",
+      "They stay the same",
+      "They alternate weekly"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "atb04",
+    "question": "Which month contains the autumn equinox in the Northern Hemisphere?",
+    "options": [
+      "August",
+      "September",
+      "October",
+      "November"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "atb05",
+    "question": "Which month contains the autumn equinox in the Southern Hemisphere?",
+    "options": [
+      "January",
+      "March",
+      "June",
+      "September"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "atb06",
+    "question": "What is the name for the annual movement of birds to warmer regions?",
+    "options": [
+      "Hibernation",
+      "Migration",
+      "Moulting",
+      "Pollination"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "atb07",
+    "question": "Which tree produces acorns?",
+    "options": [
+      "Beech",
+      "Maple",
+      "Oak",
+      "Birch"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "atb08",
+    "question": "Which tree produces winged seeds often called samaras or helicopters?",
+    "options": [
+      "Maple",
+      "Pine",
+      "Oak",
+      "Yew"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "atb09",
+    "question": "What is the botanical term for trees that shed their leaves seasonally?",
+    "options": [
+      "Evergreen",
+      "Deciduous",
+      "Coniferous",
+      "Perennial"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "atb10",
+    "question": "Which of these is a traditional British autumn harvest crop?",
+    "options": [
+      "Wheat",
+      "Pineapple",
+      "Coconut",
+      "Cacao"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "atb11",
+    "question": "Which UK celebration takes place on 5 November?",
+    "options": [
+      "May Day",
+      "Bonfire Night",
+      "Boxing Day",
+      "St George’s Day"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "atb12",
+    "question": "What is the traditional name for the full moon closest to the autumn equinox?",
+    "options": [
+      "Blue Moon",
+      "Wolf Moon",
+      "Harvest Moon",
+      "Flower Moon"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "atb13",
+    "question": "Which mushroom structure typically releases spores?",
+    "options": [
+      "Gills",
+      "Roots",
+      "Thorns",
+      "Petals"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "atb14",
+    "question": "What do hedgehogs typically build up before winter hibernation?",
+    "options": [
+      "Fat reserves",
+      "Antlers",
+      "Feathers",
+      "Egg shells"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "atb15",
+    "question": "Which of these animals is especially known for caching food for winter?",
+    "options": [
+      "Red squirrel",
+      "Swallow",
+      "Frog",
+      "Dragonfly"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "atb16",
+    "question": "Which fruit is traditionally pressed to make cider?",
+    "options": [
+      "Pear",
+      "Apple",
+      "Plum",
+      "Cherry"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "atb17",
+    "question": "Which nut grows inside a prickly green husk on a sweet chestnut tree?",
+    "options": [
+      "Walnut",
+      "Hazelnut",
+      "Sweet chestnut",
+      "Pecan"
+    ],
+    "answer": 2
+  },
+  {
+    "id": "atb18",
+    "question": "Which traditional treat is associated with the Mid-Autumn Festival?",
+    "options": [
+      "Hot cross buns",
+      "Mooncakes",
+      "Panettone",
+      "Mince pies"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "atb19",
+    "question": "In which country is the Chuseok harvest holiday celebrated?",
+    "options": [
+      "Japan",
+      "South Korea",
+      "Thailand",
+      "Vietnam"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "atb20",
+    "question": "In which month is Canadian Thanksgiving celebrated?",
+    "options": [
+      "September",
+      "October",
+      "November",
+      "December"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "atb21",
+    "question": "Which US state is the main producer of cranberries, often served at Thanksgiving?",
+    "options": [
+      "Wisconsin",
+      "Nevada",
+      "Arizona",
+      "Hawaii"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "atb22",
+    "question": "Which US president issued a Thanksgiving proclamation in 1789?",
+    "options": [
+      "George Washington",
+      "Thomas Jefferson",
+      "Abraham Lincoln",
+      "Theodore Roosevelt"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "atb23",
+    "question": "Which US president signed the law fixing Thanksgiving on the fourth Thursday of November?",
+    "options": [
+      "Woodrow Wilson",
+      "Franklin D. Roosevelt",
+      "Harry Truman",
+      "Dwight Eisenhower"
+    ],
+    "answer": 1
+  },
+  {
+    "id": "atb24",
+    "question": "What is the term for a period of unusually warm, dry weather in autumn?",
+    "options": [
+      "Indian summer",
+      "Polar night",
+      "Monsoon burst",
+      "Spring tide"
+    ],
+    "answer": 0
+  },
+  {
+    "id": "atb25",
+    "question": "Which constellation is commonly prominent in Northern Hemisphere autumn evenings?",
+    "options": [
+      "Pegasus",
+      "Orion",
+      "Crux",
+      "Carina"
+    ],
+    "answer": 0
+  }
+]
