@@ -490,16 +490,15 @@ class Game:
         ranked_scores = sorted(set(self.scores.values()), reverse=True)
         # Resolve ties affecting the top three places; unrelated ties retain shared ranks.
         final_order = []
-        # General Knowledge has a dedicated, non-repeating tiebreaker bank.
-        # Other rounds retain their existing tiebreaker behaviour.
-        if self.quiz_key == 'general_knowledge':
+        # Each category has its own dedicated tiebreaker bank.
+        if self.quiz_key in ('general_knowledge', 'autumn_thanksgiving', 'secret_service'):
             tie_pool = load_tiebreaker_questions(self.quiz_key)
         else:
             tie_pool = load_questions(self.quiz_key).copy()
         with db_connect() as conn:
             used = {r[0] for r in conn.execute('SELECT question_id FROM used_questions WHERE guild_id=?', (self.channel.guild.id,))}
         tie_pool = [q for q in tie_pool if question_id(q) not in self.used_replacement_ids]
-        if self.quiz_key == 'general_knowledge':
+        if self.quiz_key in ('general_knowledge', 'autumn_thanksgiving', 'secret_service'):
             main_ids = {question_id(q) for q in self.questions}
             tie_pool = [q for q in tie_pool if question_id(q) not in main_ids]
         random.shuffle(tie_pool)
@@ -695,7 +694,7 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
         if game.replacement_question is not None:
             return await private_notice(interaction, 'A replacement has already been selected. Resume the quiz.')
         try:
-            bank = load_tiebreaker_questions('general_knowledge')
+            bank = load_tiebreaker_questions(game.quiz_key)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             return await private_notice(interaction, f'Tiebreaker bank unavailable: {exc}')
         excluded = ({question_id(q) for q in game.questions} | game.used_replacement_ids |
