@@ -1,0 +1,3 @@
+Added 25 dedicated General Knowledge tiebreaker questions.
+Only General Knowledge sudden-death rounds draw from questions/general_knowledge_tiebreakers.json.
+Existing 2-minute preparation, 15-second answering, elimination rules, other rounds, no banners, theme colours, scoring, and SS Quiz role ID are unchanged.
