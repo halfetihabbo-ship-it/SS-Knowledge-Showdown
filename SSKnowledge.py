@@ -423,14 +423,20 @@ class Game:
         # for delivery so the visible timestamp does not overpromise the answer window.
         visible_deadline = math.ceil(time.time() + seconds + 1)
         question_embed = compact_question_embed(self.quiz_key, question, number, len(self.questions), seconds, tie=tie, deadline=visible_deadline)
+        # A pause can arrive while Discord is still delivering the question.
+        # Do not start the answer clock until delivery and any pause have finished.
+        await self.pause_gate.wait()
         message = await self.channel.send(embed=question_embed, view=view)
         self.current_question = question
         self.current_question_number = number
         self.question_sent_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
         self.active_message = message
         # Begin the countdown after Discord confirms the question message was sent.
+        await self.pause_gate.wait()
         view.started_ns = time.monotonic_ns()
         view.deadline_ns = view.started_ns + seconds * 1_000_000_000
+        # If pause happened during the send, wait for resume before counting.
+        # The resume command adjusts the deadline only if a timer already exists.
         # Freeze the *actual* answer deadline when paused, not just the interval
         # between questions. This also keeps existing accepted answers intact.
         while True:
@@ -717,24 +723,29 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
         if not game.paused:
             return await private_notice(interaction, 'The quiz is not paused.', success=False)
         elapsed_ns = time.monotonic_ns() - game.pause_started_ns
-        if game.active_view and game.active_view.open and game.active_view.deadline_ns is not None:
-            game.active_view.deadline_ns += elapsed_ns
-            if game.active_message and game.current_question is not None:
-                remaining = max(0, (game.active_view.deadline_ns - time.monotonic_ns()) / 1e9)
-                deadline = math.ceil(time.time() + remaining)
-                try:
-                    await game.active_message.edit(embed=compact_question_embed(
-                        game.quiz_key, game.current_question, game.current_question_number,
-                        len(game.questions), ANSWER_SECONDS,
-                        tie=game.phase == 'tiebreaker', deadline=deadline))
-                except discord.HTTPException:
-                    pass
+        active = game.active_view
+        if active and active.open and active.deadline_ns is not None:
+            active.deadline_ns += elapsed_ns
+        # Release the pause BEFORE awaiting Discord network calls. Otherwise a
+        # slow message edit/send consumes the remaining time while the quiz
+        # still appears paused, leading to an immediate answer reveal.
         game.pause_started_ns = None
         game.paused = False
         game.pause_gate.set()
+        await private_notice(interaction, 'Quiz resumed. The question timer continues from where it stopped.', success=True)
+        if active and active.open and active.deadline_ns is not None and game.active_message and game.current_question is not None:
+            remaining = max(0, (active.deadline_ns - time.monotonic_ns()) / 1e9)
+            deadline = math.ceil(time.time() + remaining)
+            try:
+                await game.active_message.edit(embed=compact_question_embed(
+                    game.quiz_key, game.current_question, game.current_question_number,
+                    len(game.questions), ANSWER_SECONDS,
+                    tie=game.phase == 'tiebreaker', deadline=deadline))
+            except discord.HTTPException:
+                pass
         await game.channel.send(embed=status_embed('▶️ Quiz Resumed',
             'The host has resumed the quiz. The remaining question time is restored.', True))
-        return await private_notice(interaction, 'Quiz resumed. The question timer continues from where it stopped.', success=True)
+        return
 
 
 # Operational safeguards and event-day controls.
