@@ -146,21 +146,6 @@ def embed(title, description='', color=SILVER):
     return themed_embed(title, description, color)
 
 
-def brand_file(e, kind='question', quiz_key='secret_service'):
-    """Attach the actual SS logo artwork within a sleek header banner."""
-    name = f'{kind}.png'
-    path = ASSET_DIR / quiz_key / name
-    if not path.is_file():
-        path = ASSET_DIR / name
-    if not path.is_file():
-        path = Path(__file__).parent / name
-    if path.is_file():
-        unique_name = f'{quiz_key}_{name}'
-        e.set_image(url=f'attachment://{unique_name}')
-        return discord.File(path, filename=unique_name)
-    return None
-
-
 # Compact question embeds: no full-width banners or fixed question numbers.
 ROUND_STYLE = {
     'secret_service': ('🛡️', discord.Color.from_rgb(35, 79, 130)),
@@ -184,19 +169,14 @@ def compact_question_embed(quiz_key, question, number, total, seconds, tie=False
 
 
 async def send_branded(channel, e, kind='question', quiz_key='secret_service', **kwargs):
-    picture = brand_file(e, kind, quiz_key)
-    if picture:
-        kwargs['file'] = picture
+    # Retained as a compatibility wrapper; no banners or image attachments.
+    e.color = ROUND_STYLE[quiz_key][1]
     return await channel.send(embed=e, **kwargs)
 
 
 async def respond_branded(interaction, e, kind='leaderboard', quiz_key='secret_service', ephemeral=False):
-    picture = brand_file(e, kind, quiz_key)
-    if picture:
-        return await interaction.response.send_message(embed=e, file=picture, ephemeral=ephemeral)
+    e.color = ROUND_STYLE[quiz_key][1]
     return await interaction.response.send_message(embed=e, ephemeral=ephemeral)
-
-
 
 
 async def private_notice(interaction, message, success=False):
@@ -211,10 +191,8 @@ def status_embed(title, message, highlight=False):
 
 
 def branded_lobby_embed(description, quiz_key='secret_service'):
-    e = themed_embed(f'{QUIZ_NAMES[quiz_key]} | Lobby', description)
-    # The lobby image is assigned by brand_file on first send.
-    e.set_image(url=f'attachment://{quiz_key}_lobby.png')
-    return e
+    icon, colour = ROUND_STYLE[quiz_key]
+    return themed_embed(f'{icon} {QUIZ_NAMES[quiz_key]} | Lobby', description, colour)
 
 
 class LobbyView(discord.ui.View):
@@ -332,7 +310,7 @@ class Game:
                 await self.lobby_message.edit(embed=branded_lobby_embed(
                     f'**Players:** {len(self.players)}/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
                     f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n**Test mode:** {MIN_PLAYERS} player minimum\n\n'
-                    'Click **Join Quiz** to enter!', self.quiz_key), view=LobbyView(self), attachments=self.lobby_message.attachments)
+                    'Click **Join Quiz** to enter!', self.quiz_key), view=LobbyView(self))
             except discord.HTTPException:
                 pass
 
@@ -361,7 +339,7 @@ class Game:
             if self.lobby_message:
                 await self.lobby_message.edit(view=None)
             await self.channel.send(content=f'<@&{SS_QUIZ_ROLE_ID}>', allowed_mentions=ROLE_MENTIONS,
-                                    embed=status_embed('The Showdown Begins', f'**{QUIZ_NAMES[self.quiz_key]}**\n**{len(self.players)}** competitors are ready.\n\n**25 questions**  •  **15 seconds each**  •  **Speed scoring: 4 / 3 / 2 / 1 pts**', True))
+                                    embed=themed_embed('The Showdown Begins', f'**{QUIZ_NAMES[self.quiz_key]}**\n**{len(self.players)}** competitors are ready.\n\n**25 questions**  •  **15 seconds each**  •  **Speed scoring: 4 / 3 / 2 / 1 pts**', ROUND_STYLE[self.quiz_key][1]))
             for i, question in enumerate(self.questions, 1):
                 if self.phase == 'ended':
                     return
@@ -415,10 +393,10 @@ class Game:
         letter = chr(65 + question['answer'])
         scoring_text = ('' if tie else
             '\n**Scoring:** Fastest correct = 4 pts, second = 3, third = 2, remaining = 1.')
-        await self.channel.send(embed=embed('Answer Revealed',
+        await self.channel.send(embed=themed_embed('Answer Revealed',
             f"**Correct answer:** {letter}. {question['options'][question['answer']]}\n"
             f"**Correct players:** {len(correct)}/{len(eligible)}"
-            f"{scoring_text}", GOLD))
+            f"{scoring_text}", ROUND_STYLE[self.quiz_key][1]))
         self.active_view = None
         self.active_message = None
         return correct
@@ -427,7 +405,7 @@ class Game:
         ranked = sorted(self.scores, key=lambda uid: (-self.scores[uid], self.players[uid].lower()))
         lines = [f'**{i}.** {self.players[uid]} — **{self.scores[uid]}** pts'
                  for i, uid in enumerate(ranked[:10], 1)]
-        return embed(f'{QUIZ_NAMES[self.quiz_key]} | Top 10', '\n'.join(lines) or 'No players yet.')
+        return themed_embed(f'{QUIZ_NAMES[self.quiz_key]} | Top 10', '\n'.join(lines) or 'No players yet.', ROUND_STYLE[self.quiz_key][1])
 
     async def finish(self):
         if self.phase == 'ended':
