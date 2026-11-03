@@ -16,6 +16,8 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID', '0'))
 # Only these two Discord accounts may manage quizzes.
 HOST_IDS = {1501587787294703657, 1204163177793720331}
+SS_QUIZ_ROLE_ID = 1557709898706329642
+ROLE_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(id=SS_QUIZ_ROLE_ID)])
 MAX_PLAYERS = 50
 QUESTION_COUNT = 25
 ANSWER_SECONDS = 15
@@ -23,6 +25,7 @@ MIN_PLAYERS = 1  # TEMPORARY: set back to 2 after testing
 LOBBY_SECONDS = 600
 INTERMISSION_SECONDS = 7
 TIE_READY_SECONDS = 120
+QUIZ_ROLE_EMOJI = "🧠"
 QUESTION_DIR = Path(__file__).with_name('questions')
 QUIZ_NAMES = {'secret_service': 'Secret Service Trivia', 'autumn_thanksgiving': 'Autumn & Thanksgiving Trivia', 'general_knowledge': 'General Knowledge Trivia'}
 DATA_DIR = Path(os.getenv('DATA_DIR', str(Path(__file__).parent)))
@@ -40,6 +43,7 @@ games = {}
 
 def db_connect():
     conn = sqlite3.connect(DB_FILE)
+    conn.execute('CREATE TABLE IF NOT EXISTS quiz_role_panels (message_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, channel_id INTEGER NOT NULL)')
     conn.execute('CREATE TABLE IF NOT EXISTS used_questions (guild_id INTEGER NOT NULL, question_id TEXT NOT NULL, PRIMARY KEY (guild_id, question_id))')
     conn.execute('CREATE TABLE IF NOT EXISTS rounds (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, played_at TEXT NOT NULL, player_count INTEGER NOT NULL)')
     conn.execute('CREATE TABLE IF NOT EXISTS results (round_id INTEGER NOT NULL, user_id INTEGER NOT NULL, name TEXT NOT NULL, score INTEGER NOT NULL, placement INTEGER NOT NULL, PRIMARY KEY(round_id, user_id))')
@@ -323,7 +327,8 @@ class Game:
             self.phase = 'playing'
             if self.lobby_message:
                 await self.lobby_message.edit(view=None)
-            await self.channel.send(embed=status_embed('The Showdown Begins', f'**{QUIZ_NAMES[self.quiz_key]}**\n**{len(self.players)}** competitors are ready.\n\n**25 questions**  •  **15 seconds each**  •  **Speed scoring: 4 / 3 / 2 / 1 pts**', True))
+            await self.channel.send(content=f'<@&{SS_QUIZ_ROLE_ID}>', allowed_mentions=ROLE_MENTIONS,
+                                    embed=status_embed('The Showdown Begins', f'**{QUIZ_NAMES[self.quiz_key]}**\n**{len(self.players)}** competitors are ready.\n\n**25 questions**  •  **15 seconds each**  •  **Speed scoring: 4 / 3 / 2 / 1 pts**', True))
             for i, question in enumerate(self.questions, 1):
                 if self.phase == 'ended':
                     return
@@ -350,7 +355,7 @@ class Game:
 
     async def ask(self, question, number, tie, eligible):
         self.phase = 'tiebreaker' if tie else 'playing'
-        seconds = 10 if tie else ANSWER_SECONDS
+        seconds = ANSWER_SECONDS
         view = AnswerView(self, question, eligible, seconds)
         self.active_view = view
         title = f'SUDDEN DEATH  /  QUESTION {number}' if tie else f'QUESTION {number:02d} / {len(self.questions):02d}'
@@ -418,7 +423,7 @@ class Game:
         await self.channel.send(
             content=mentions,
             embed=status_embed('Sudden Death | Tiebreaker',
-                f'Competitors are tied at **{score:,} points**.\n\n**Preparation:** {TIE_READY_SECONDS // 60} minutes\n**Answer window:** 10 seconds', True),
+                f'Competitors are tied at **{score:,} points**.\n\n**Preparation:** {TIE_READY_SECONDS // 60} minutes\n**Answer window:** {ANSWER_SECONDS} seconds', True),
             allowed_mentions=discord.AllowedMentions(users=True))
         if not await self.wait_or_end(TIE_READY_SECONDS):
             return tied
@@ -475,7 +480,9 @@ class QuizSelect(discord.ui.Select):
         game.lobby_message = await send_branded(interaction.channel, branded_lobby_embed(
             f'**Theme:** {QUIZ_NAMES[quiz_key]}\n**Players:** 0/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
             f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n\n'
-            'Click **Join Quiz** to enter!', quiz_key), 'lobby', quiz_key=quiz_key, view=LobbyView(game))
+            'Click **Join Quiz** to enter!', quiz_key), 'lobby', quiz_key=quiz_key, view=LobbyView(game),
+            content=f'<@&{SS_QUIZ_ROLE_ID}> — **{QUIZ_NAMES[quiz_key]}** lobby is open! Join now.',
+            allowed_mentions=ROLE_MENTIONS)
         game.task = asyncio.create_task(game.run())
 
 
@@ -562,6 +569,94 @@ async def quiz_records(interaction: discord.Interaction):
     if not interaction.guild:
         return await private_notice(interaction, 'Use this command in a server.', success=False)
     await interaction.response.send_message('Choose the quiz to view its records:', view=ThemeSelectView('records'), ephemeral=True)
+
+
+@bot.tree.command(name='quiz-role-panel', description='Post the Secret Service quiz reaction-role announcement')
+async def quiz_role_panel(interaction: discord.Interaction):
+    if not host_only(interaction):
+        return await private_notice(interaction, 'Only authorised quiz hosts can post the role panel.')
+    guild = interaction.guild
+    role = guild.get_role(SS_QUIZ_ROLE_ID)
+    if role is None:
+        return await private_notice(interaction, 'The SS Quiz role was not found in this server.')
+    me = guild.me
+    if me is None or not me.guild_permissions.manage_roles or role >= me.top_role:
+        return await private_notice(interaction, 'Give the bot Manage Roles and move its highest role above SS Quiz.')
+    await interaction.response.defer(ephemeral=True)
+    announcement = themed_embed(
+        '🧠 SECRET SERVICE KNOWLEDGE SHOWDOWN',
+        '**Think you have what it takes to become our next Quiz Champion?** 🏆\n\n'
+        'Join Halfeti & Gumdrop for three exciting rounds of trivia, with prizes '
+        'up for grabs in **each round**!\n\n'
+        '📅 **Date:** Monday, 9th November 2026\n'
+        '🕑 **Time:** 2:00 PM GMT\n'
+        '🎤 **Hosts:** Halfeti & Gumdrop\n\n'
+        '**🎯 THE THREE ROUNDS**\n'
+        '1️⃣ Secret Service Trivia\n'
+        '2️⃣ Autumn & Thanksgiving Trivia\n'
+        '3️⃣ General Knowledge Trivia\n\n'
+        '**🏆 PRIZES — AWARDED IN EACH ROUND**\n'
+        '🥇 **1st Place:** 100c + HC Box\n'
+        '🥈 **2nd Place:** 50c\n'
+        '🥉 **3rd Place:** 25c\n\n'
+        '**🔓 HOW TO PARTICIPATE**\n'
+        f'React with {QUIZ_ROLE_EMOJI} below to receive the **@SS Quiz** role and unlock '
+        'access to our dedicated quiz channels!\n\n'
+        'You will also be notified when the quiz lobby opens and when the game begins.\n\n'
+        '**React now to get access and prepare for the Showdown!** 🏆\n\n'
+        f'*Remove your {QUIZ_ROLE_EMOJI} reaction to remove the role.*',
+        GOLD)
+    try:
+        message = await interaction.channel.send(embed=announcement)
+        with db_connect() as conn:
+            conn.execute('INSERT INTO quiz_role_panels (message_id, guild_id, channel_id) VALUES (?, ?, ?)',
+                         (message.id, guild.id, interaction.channel.id))
+        await message.add_reaction(QUIZ_ROLE_EMOJI)
+    except discord.HTTPException:
+        await interaction.followup.send('Could not post the panel or add the reaction. Check Send Messages, Embed Links and Add Reactions permissions.', ephemeral=True)
+        return
+    await interaction.followup.send(f'Quiz role panel posted: {message.jump_url}', ephemeral=True)
+
+
+def is_quiz_role_panel(message_id, guild_id):
+    with db_connect() as conn:
+        return conn.execute('SELECT 1 FROM quiz_role_panels WHERE message_id=? AND guild_id=?',
+                            (message_id, guild_id)).fetchone() is not None
+
+
+async def update_quiz_role(payload, add):
+    if payload.guild_id is None or payload.user_id == bot.user.id or str(payload.emoji) != QUIZ_ROLE_EMOJI:
+        return
+    if not is_quiz_role_panel(payload.message_id, payload.guild_id):
+        return
+    guild = bot.get_guild(payload.guild_id)
+    if guild is None:
+        return
+    role = guild.get_role(SS_QUIZ_ROLE_ID)
+    if role is None:
+        return
+    try:
+        member = guild.get_member(payload.user_id)
+        if member is None:
+            member = await guild.fetch_member(payload.user_id)
+        if member.bot:
+            return
+        if add:
+            await member.add_roles(role, reason='Reacted to the SS Quiz role panel')
+        else:
+            await member.remove_roles(role, reason='Removed reaction from the SS Quiz role panel')
+    except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
+        print(f'Quiz reaction-role update failed for {payload.user_id}: {exc}')
+
+
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    await update_quiz_role(payload, True)
+
+
+@bot.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    await update_quiz_role(payload, False)
 
 
 @bot.event
