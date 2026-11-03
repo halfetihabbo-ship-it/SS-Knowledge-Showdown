@@ -5,6 +5,7 @@ import random
 import sqlite3
 import time
 import hashlib
+import math
 from datetime import datetime, timezone
 from collections import defaultdict
 from pathlib import Path
@@ -22,7 +23,7 @@ ROLE_MENTIONS = discord.AllowedMentions(everyone=False, users=False, roles=[disc
 MAX_PLAYERS = 50
 QUESTION_COUNT = 25
 ANSWER_SECONDS = 15
-MIN_PLAYERS = 1  # TEMPORARY: set back to 2 after testing
+MIN_PLAYERS = 2
 LOBBY_SECONDS = 600
 INTERMISSION_SECONDS = 7
 TIE_READY_SECONDS = 120
@@ -47,12 +48,20 @@ def db_connect():
     conn.execute('CREATE TABLE IF NOT EXISTS quiz_role_panels (message_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, channel_id INTEGER NOT NULL)')
     conn.execute('CREATE TABLE IF NOT EXISTS used_questions (guild_id INTEGER NOT NULL, question_id TEXT NOT NULL, PRIMARY KEY (guild_id, question_id))')
     conn.execute('CREATE TABLE IF NOT EXISTS rounds (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, played_at TEXT NOT NULL, player_count INTEGER NOT NULL)')
+    conn.execute('CREATE TABLE IF NOT EXISTS disputes (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, quiz_key TEXT, question_number INTEGER, question TEXT, reason TEXT, created_at TEXT, status TEXT DEFAULT open)')
+    conn.execute('CREATE TABLE IF NOT EXISTS host_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, host_id INTEGER NOT NULL, action TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)')
     conn.execute('CREATE TABLE IF NOT EXISTS results (round_id INTEGER NOT NULL, user_id INTEGER NOT NULL, name TEXT NOT NULL, score INTEGER NOT NULL, placement INTEGER NOT NULL, PRIMARY KEY(round_id, user_id))')
     columns = {row[1] for row in conn.execute('PRAGMA table_info(rounds)')}
     if 'quiz_key' not in columns:
         conn.execute("ALTER TABLE rounds ADD COLUMN quiz_key TEXT NOT NULL DEFAULT 'legacy'")
     conn.commit()
     return conn
+
+
+def audit_action(interaction, action, details=''):
+    with db_connect() as conn:
+        conn.execute('INSERT INTO host_audit (guild_id, host_id, action, details, created_at) VALUES (?, ?, ?, ?, ?)',
+                     (interaction.guild.id, interaction.user.id, action, details[:500], datetime.now(timezone.utc).isoformat(timespec='seconds')))
 
 
 def question_id(question):
@@ -140,6 +149,7 @@ def load_tiebreaker_questions(quiz_key):
     return valid
 
 
+
 def host_only(interaction):
     return interaction.guild is not None and interaction.user.id in HOST_IDS
 
@@ -168,7 +178,7 @@ ROUND_STYLE = {
     'general_knowledge': ('🧠', discord.Color.from_rgb(133, 100, 201)),
 }
 
-def compact_question_embed(quiz_key, question, number, total, seconds, tie=False):
+def compact_question_embed(quiz_key, question, number, total, seconds, tie=False, deadline=None):
     icon, accent = ROUND_STYLE[quiz_key]
     title = (f'⚡ SUDDEN DEATH | QUESTION {number}' if tie
              else f'{icon} {QUIZ_NAMES[quiz_key]} | QUESTION {number:02d} / {total:02d}')
@@ -179,6 +189,8 @@ def compact_question_embed(quiz_key, question, number, total, seconds, tie=False
         color=accent,
     )
     e.set_author(name='SECRET SERVICE  |  KNOWLEDGE SHOWDOWN')
+    if deadline is not None:
+        e.add_field(name='Answer deadline', value=f'<t:{deadline}:R> · <t:{deadline}:T> (Discord time)', inline=False)
     e.set_footer(text=f'{seconds} seconds to answer  •  Select one button below  •  Answer locks on click')
     return e
 
@@ -273,7 +285,9 @@ class AnswerView(discord.ui.View):
                 # Timestamp before acquiring the lock or performing any Discord API calls.
                 received_ns = time.monotonic_ns()
                 async with self.lock:
-                    if (not self.open or self.game.phase == 'ended'
+                    if self.game.paused:
+                        notice = ('The quiz is paused. Please wait for the host to resume.', False)
+                    elif (not self.open or self.game.phase == 'ended'
                             or self.started_ns is None or received_ns >= self.deadline_ns):
                         notice = ('This question is closed.', False)
                     elif interaction.user.id not in self.eligible:
@@ -283,9 +297,13 @@ class AnswerView(discord.ui.View):
                     else:
                         self.answers[interaction.user.id] = choice
                         self.answer_receipts[interaction.user.id] = (received_ns, interaction.id, choice)
-                        notice = ('Answer locked in. Your selection is private.', True)
-                # Acknowledge outside the lock so network delays cannot block other clicks.
-                await private_notice(interaction, notice[0], success=notice[1])
+                        notice = None
+                # Acknowledge valid answers privately, without posting to the game channel.
+                # Keep Discord API calls outside the lock for fair receipt timestamps.
+                if notice is None:
+                    await private_notice(interaction, 'Your answer is locked in!', success=True)
+                else:
+                    await private_notice(interaction, notice[0], success=notice[1])
             button.callback = callback
             self.add_item(button)
 
@@ -318,13 +336,21 @@ class Game:
         self.active_view = None
         self.active_message = None
         self.round_number = 0
+        self.pending_results = None
+        self.results_gate = asyncio.Event()
+        self.current_question = None
+        self.current_question_number = None
+        self.pause_started_ns = None
+        self.pause_reason = None
+        self.question_sent_at = None
+        self.question_lock = asyncio.Lock()
 
     async def refresh_lobby(self):
         if self.lobby_message and self.phase == 'lobby':
             try:
                 await self.lobby_message.edit(embed=branded_lobby_embed(
                     f'**Players:** {len(self.players)}/{MAX_PLAYERS}\n**Questions:** {QUESTION_COUNT}\n'
-                    f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n**Test mode:** {MIN_PLAYERS} player minimum\n\n'
+                    f'**Answer time:** {ANSWER_SECONDS}s\n**Lobby:** {LOBBY_SECONDS // 60} minutes (or host starts early)\n**Minimum players:** {MIN_PLAYERS}\n\n'
                     'Click **Join Quiz** to enter!', self.quiz_key), view=LobbyView(self))
             except discord.HTTPException:
                 pass
@@ -363,10 +389,11 @@ class Game:
                 await self.ask(question, i, False, list(self.players))
                 if self.phase == 'ended':
                     return
+                if not await self.wait_or_end(INTERMISSION_SECONDS):
+                    return
                 if i % 5 == 0:
                     await send_branded(self.channel, self.leaderboard(), 'leaderboard', quiz_key=self.quiz_key)
-                if i < len(self.questions) and not await self.wait_or_end(INTERMISSION_SECONDS):
-                    return
+            await self.pause_gate.wait()
             await self.finish()
         except asyncio.CancelledError:
             raise
@@ -389,12 +416,27 @@ class Game:
         question_embed = compact_question_embed(
             self.quiz_key, question, number, len(self.questions), seconds, tie=tie
         )
+        # Deadline is established immediately before sending; allow up to one second
+        # for delivery so the visible timestamp does not overpromise the answer window.
+        visible_deadline = math.ceil(time.time() + seconds + 1)
+        question_embed = compact_question_embed(self.quiz_key, question, number, len(self.questions), seconds, tie=tie, deadline=visible_deadline)
         message = await self.channel.send(embed=question_embed, view=view)
+        self.current_question = question
+        self.current_question_number = number
+        self.question_sent_at = datetime.now(timezone.utc).isoformat(timespec='seconds')
         self.active_message = message
         # Begin the countdown after Discord confirms the question message was sent.
         view.started_ns = time.monotonic_ns()
         view.deadline_ns = view.started_ns + seconds * 1_000_000_000
-        await asyncio.sleep(seconds)
+        # Freeze the *actual* answer deadline when paused, not just the interval
+        # between questions. This also keeps existing accepted answers intact.
+        while True:
+            if self.phase == 'ended':
+                break
+            await self.pause_gate.wait()
+            if time.monotonic_ns() >= view.deadline_ns:
+                break
+            await asyncio.sleep(min(0.15, max(0.01, (view.deadline_ns - time.monotonic_ns()) / 1e9)))
         await view.close(message)
         if self.phase == 'ended':
             return set()
@@ -403,7 +445,8 @@ class Game:
         correct_in_order = sorted(correct, key=lambda uid: view.answer_receipts[uid][:2])
         if not tie:
             for place, uid in enumerate(correct_in_order):
-                self.scores[uid] += (4, 3, 2)[place] if place < 3 else 1
+                points = (4, 3, 2)[place] if place < 3 else 1
+                self.scores[uid] += points
 
         letter = chr(65 + question['answer'])
         scoring_text = ('' if tie else
@@ -414,6 +457,7 @@ class Game:
             f"{scoring_text}", ROUND_STYLE[self.quiz_key][1]))
         self.active_view = None
         self.active_message = None
+        self.current_question = None
         return correct
 
     def leaderboard(self):
@@ -455,6 +499,14 @@ class Game:
         medals = ['🥇', '🥈', '🥉']
         lines = [f'{medals[i] if i < 3 else f"{i+1}."} <@{uid}> — **{self.scores[uid]} pts**'
                  for i, uid in enumerate(final_order)]
+        self.pending_results = final_order
+        self.results_gate.clear()
+        await self.channel.send(embed=status_embed('Results Awaiting Host Approval',
+            'The final standings are ready. An authorised host must use `/quiz-approve-results` to publish and save them. '
+            'Use `/quiz-reject-results` to withhold the results.', True))
+        await self.results_gate.wait()
+        if self.phase == 'ended' or self.pending_results is None:
+            return
         save_round(self, final_order)
         await send_branded(self.channel, embed(f'{QUIZ_NAMES[self.quiz_key]} | Final Standings', '\n'.join(lines), GOLD), 'results', quiz_key=self.quiz_key)
         await self.channel.send(embed=status_embed('View Previous Results', f'**Theme:** {QUIZ_NAMES[self.quiz_key]}\n**Round history:** `/quiz-history`\n**Theme records:** `/quiz-records`'))
@@ -558,7 +610,7 @@ class ThemeSelectView(discord.ui.View):
 
 @bot.tree.command(name='quiz', description='SS quiz host commands')
 @app_commands.describe(action='Choose a quiz action')
-@app_commands.choices(action=[app_commands.Choice(name=x, value=x) for x in ('start', 'pause', 'resume', 'skip', 'leaderboard', 'end')])
+@app_commands.choices(action=[app_commands.Choice(name=x, value=x) for x in ('start', 'pause', 'resume', 'leaderboard', 'end')])
 async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str]):
     if not interaction.guild:
         return await private_notice(interaction, 'Use this command in a server.', success=False)
@@ -577,25 +629,168 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
     if not game:
         return await private_notice(interaction, 'No quiz is running.', success=False)
     if command == 'end':
+        audit_action(interaction, 'end')
         game.phase = 'ended'
         game.pause_gate.set()
         if game.active_view and game.active_message:
             await game.active_view.close(game.active_message)
+        game.results_gate.set()
         if game.task:
             game.task.cancel()
         games.pop(interaction.guild.id, None)
         return await private_notice(interaction, 'Quiz ended by the host.', success=True)
     if command == 'pause':
+        audit_action(interaction, 'pause')
+        if game.paused:
+            return await private_notice(interaction, 'The quiz is already paused.', success=False)
         game.paused = True
+        game.pause_started_ns = time.monotonic_ns()
         game.pause_gate.clear()
-        return await private_notice(interaction, 'Quiz paused. The active question will finish normally.', success=True)
+        await game.channel.send(embed=status_embed('⏸️ Quiz Paused',
+            'The host has paused the quiz for review or a player disconnection. '
+            'The question timer is frozen and new answers are temporarily disabled. '
+            'Please wait for the host to resume.', True))
+        return await private_notice(interaction, 'Quiz paused. The active question timer is frozen.', success=True)
     if command == 'resume':
+        audit_action(interaction, 'resume')
+        if not game.paused:
+            return await private_notice(interaction, 'The quiz is not paused.', success=False)
+        elapsed_ns = time.monotonic_ns() - game.pause_started_ns
+        if game.active_view and game.active_view.open and game.active_view.deadline_ns is not None:
+            game.active_view.deadline_ns += elapsed_ns
+            if game.active_message and game.current_question is not None:
+                remaining = max(0, (game.active_view.deadline_ns - time.monotonic_ns()) / 1e9)
+                deadline = math.ceil(time.time() + remaining)
+                try:
+                    await game.active_message.edit(embed=compact_question_embed(
+                        game.quiz_key, game.current_question, game.current_question_number,
+                        len(game.questions), ANSWER_SECONDS,
+                        tie=game.phase == 'tiebreaker', deadline=deadline))
+                except discord.HTTPException:
+                    pass
+        game.pause_started_ns = None
         game.paused = False
         game.pause_gate.set()
-        return await private_notice(interaction, 'Quiz resumed.', success=True)
-    if command == 'skip':
-        return await private_notice(interaction, 'Skipping is not enabled in this version, to avoid unfairly shortening an active question.', success=False)
+        await game.channel.send(embed=status_embed('▶️ Quiz Resumed',
+            'The host has resumed the quiz. The remaining question time is restored.', True))
+        return await private_notice(interaction, 'Quiz resumed. The question timer continues from where it stopped.', success=True)
 
+
+# Operational safeguards and event-day controls.
+@bot.tree.command(name='quiz-system-check', description='Host-only: check quiz banks, permissions and deployment readiness')
+async def quiz_system_check(interaction: discord.Interaction):
+    if not host_only(interaction):
+        return await private_notice(interaction, 'Only authorised hosts may run the system check.')
+    lines = []
+    issues = []
+    for key, name in QUIZ_NAMES.items():
+        try:
+            questions = load_questions(key)
+            if len(questions) < QUESTION_COUNT:
+                raise ValueError(f'Only {len(questions)} valid questions; need {QUESTION_COUNT}')
+            lines.append(f'✅ {name}: {len(questions)} valid questions')
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            issues.append(f'❌ {name}: {exc}')
+    try:
+        bank = load_tiebreaker_questions('general_knowledge')
+        lines.append(f'✅ General Knowledge tiebreakers: {len(bank)} valid questions')
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        issues.append(f'❌ General Knowledge tiebreakers: {exc}')
+    try:
+        with db_connect() as conn:
+            conn.execute('SELECT 1').fetchone()
+        lines.append('✅ SQLite database accessible')
+    except Exception as exc:
+        issues.append(f'❌ SQLite database: {exc}')
+    me = interaction.guild.me
+    perms = interaction.channel.permissions_for(me)
+    for label, value in [('Send Messages', perms.send_messages), ('Embed Links', perms.embed_links),
+                         ('Read Message History', perms.read_message_history)]:
+        (lines if value else issues).append(('✅ ' if value else '❌ ') + label)
+    await interaction.response.send_message(embed=status_embed('Pre-event System Check',
+        '\n'.join(lines + issues) + ('\n\n**Action required:** Fix the issues above.' if issues else '\n\n**All checked items passed.**')), ephemeral=True)
+
+@bot.tree.command(name='quiz-approve-results', description='Host-only: publish and save the pending final standings')
+async def quiz_approve_results(interaction: discord.Interaction):
+    if not host_only(interaction):
+        return await private_notice(interaction, 'Only authorised hosts can approve results.')
+    game = games.get(interaction.guild.id)
+    if not game or game.pending_results is None or game.results_gate.is_set():
+        return await private_notice(interaction, 'No results are awaiting approval.')
+    audit_action(interaction, 'approve_results')
+    game.results_gate.set()
+    await private_notice(interaction, 'Approved. Final standings will now be published and saved.', True)
+
+@bot.tree.command(name='quiz-reject-results', description='Host-only: withhold pending results without saving them')
+async def quiz_reject_results(interaction: discord.Interaction):
+    if not host_only(interaction):
+        return await private_notice(interaction, 'Only authorised hosts can reject results.')
+    game = games.get(interaction.guild.id)
+    if not game or game.pending_results is None or game.results_gate.is_set():
+        return await private_notice(interaction, 'No results are awaiting approval.')
+    audit_action(interaction, 'reject_results')
+    game.pending_results = None
+    game.results_gate.set()
+    await private_notice(interaction, 'Results withheld; no official results will be saved.', True)
+
+@bot.tree.command(name='quiz-dispute', description='Privately flag a live quiz question for host review')
+@app_commands.describe(reason='Briefly explain the concern about the question')
+async def quiz_dispute(interaction: discord.Interaction, reason: str):
+    game = games.get(interaction.guild.id) if interaction.guild else None
+    if not game or game.current_question is None or interaction.user.id not in game.players:
+        return await private_notice(interaction, 'You can only dispute a question while participating in a live quiz.')
+    reason = reason.strip()
+    if not 5 <= len(reason) <= 400:
+        return await private_notice(interaction, 'Please provide a reason between 5 and 400 characters.')
+    with db_connect() as conn:
+        cursor = conn.execute('INSERT INTO disputes (guild_id, user_id, quiz_key, question_number, question, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (interaction.guild.id, interaction.user.id, game.quiz_key, game.current_question_number,
+             game.current_question['question'], reason, datetime.now(timezone.utc).isoformat(timespec='seconds')))
+        dispute_id = cursor.lastrowid
+    await private_notice(interaction, f'Dispute #{dispute_id} submitted privately. A host can review it using `/quiz-disputes`.', True)
+
+@bot.tree.command(name='quiz-disputes', description='Host-only: review recent quiz question disputes')
+async def quiz_disputes(interaction: discord.Interaction):
+    if not host_only(interaction):
+        return await private_notice(interaction, 'Only authorised hosts can view disputes.')
+    with db_connect() as conn:
+        rows = conn.execute('SELECT id, user_id, question_number, question, reason FROM disputes WHERE guild_id=? ORDER BY id DESC LIMIT 10', (interaction.guild.id,)).fetchall()
+    lines = [f'**#{rid} · Q{num} · <@{uid}>**\n{question[:140]}\nReason: {reason[:250]}' for rid, uid, num, question, reason in rows]
+    await interaction.response.send_message(embed=status_embed('Recent Question Disputes', '\n\n'.join(lines) or 'No disputes submitted.'), ephemeral=True)
+
+# Event-day controls: host-only, no extra public messages except cancellation notices.
+@bot.tree.command(name='quiz-host-status', description='Host-only: view live quiz status and unresolved disputes')
+async def quiz_host_status(interaction: discord.Interaction):
+    if not host_only(interaction):
+        return await private_notice(interaction, 'Only authorised hosts can view quiz status.')
+    game = games.get(interaction.guild.id)
+    if not game:
+        return await private_notice(interaction, 'No quiz is active.')
+    view = game.active_view
+    answers = len(view.answers) if view else 0
+    eligible = len(view.eligible) if view else len(game.players)
+    remaining = (max(0, (view.deadline_ns - (game.pause_started_ns if game.paused else time.monotonic_ns())) / 1e9)
+                 if view and view.deadline_ns else None)
+    with db_connect() as conn:
+        disputes = conn.execute("SELECT COUNT(*) FROM disputes WHERE guild_id=? AND status='open'", (interaction.guild.id,)).fetchone()[0]
+    details = (f'**Category:** {QUIZ_NAMES[game.quiz_key]}\n**Phase:** {game.phase}\n'
+               f'**Paused:** {"Yes" if game.paused else "No"}\n**Question:** {game.current_question_number or game.round_number}/{QUESTION_COUNT}\n'
+               f'**Registered:** {len(game.players)}\n**Answers:** {answers}/{eligible}\n'
+               f'**Time remaining:** {remaining:.1f}s\n' if remaining is not None else
+               f'**Category:** {QUIZ_NAMES[game.quiz_key]}\n**Phase:** {game.phase}\n**Paused:** {game.paused}\n'
+               f'**Question:** {game.round_number}/{QUESTION_COUNT}\n**Registered:** {len(game.players)}\n')
+    details += f'**Open disputes:** {disputes}\n**Pending results approval:** {game.pending_results is not None}'
+    await interaction.response.send_message(embed=status_embed('Host Dashboard', details), ephemeral=True)
+
+
+@bot.tree.command(name='quiz-host-audit', description='Host-only: show the most recent host actions')
+async def quiz_host_audit(interaction: discord.Interaction):
+    if not host_only(interaction):
+        return await private_notice(interaction, 'Only authorised hosts can view the audit log.')
+    with db_connect() as conn:
+        rows = conn.execute('SELECT host_id, action, details, created_at FROM host_audit WHERE guild_id=? ORDER BY id DESC LIMIT 15', (interaction.guild.id,)).fetchall()
+    lines = [f'`{when[5:16].replace("T", " ")} UTC` <@{uid}> — **{action}** {details or ""}' for uid, action, details, when in rows]
+    await interaction.response.send_message(embed=status_embed('Host Action Audit', '\n'.join(lines) or 'No actions recorded.'), ephemeral=True)
 
 # Isolated host-only tiebreaker testing; never writes scores or question usage to SQLite.
 tiebreaker_tests = {}
