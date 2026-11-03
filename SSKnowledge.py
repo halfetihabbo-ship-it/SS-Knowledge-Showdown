@@ -388,23 +388,11 @@ class Game:
                 self.scores[uid] += (4, 3, 2)[place] if place < 3 else 1
 
         letter = chr(65 + question['answer'])
-        fastest_lines = []
-        medals = ('🥇', '🥈', '🥉')
-        for place, uid in enumerate(correct_in_order[:3]):
-            received_ns = view.answer_receipts[uid][0]
-            elapsed = max(0.0, (received_ns - view.started_ns) / 1_000_000_000)
-            name = discord.utils.escape_markdown(self.players.get(uid, str(uid)))
-            points = '' if tie else f'  •  **+{(4, 3, 2)[place]} pts**'
-            fastest_lines.append(f'{medals[place]} **{name}** — **{elapsed:.2f}s**{points}')
-        fastest_text = '\n'.join(fastest_lines) if fastest_lines else 'No correct answers this question.'
-        other_correct = max(0, len(correct_in_order) - 3)
         scoring_text = ('' if tie else
-            f'\n**Other correct answers:** {other_correct} player(s) earned **+1 point**.\n'
-            '**Scoring:** Fastest correct = 4 pts, second = 3, third = 2, remaining = 1.')
+            '\n**Scoring:** Fastest correct = 4 pts, second = 3, third = 2, remaining = 1.')
         await self.channel.send(embed=embed('Answer Revealed',
             f"**Correct answer:** {letter}. {question['options'][question['answer']]}\n"
-            f"**Correct players:** {len(correct)}/{len(eligible)}\n\n"
-            f"⚡ **Fastest Correct Answers**\n{fastest_text}"
+            f"**Correct players:** {len(correct)}/{len(eligible)}"
             f"{scoring_text}", GOLD))
         self.active_view = None
         self.active_message = None
