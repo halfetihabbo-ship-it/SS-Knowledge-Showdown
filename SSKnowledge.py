@@ -46,22 +46,15 @@ games = {}
 def db_connect():
     conn = sqlite3.connect(DB_FILE)
     conn.execute('CREATE TABLE IF NOT EXISTS quiz_role_panels (message_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, channel_id INTEGER NOT NULL)')
+    conn.execute('CREATE TABLE IF NOT EXISTS redundant_questions (guild_id INTEGER NOT NULL, question_id TEXT NOT NULL, PRIMARY KEY (guild_id, question_id))')
     conn.execute('CREATE TABLE IF NOT EXISTS used_questions (guild_id INTEGER NOT NULL, question_id TEXT NOT NULL, PRIMARY KEY (guild_id, question_id))')
     conn.execute('CREATE TABLE IF NOT EXISTS rounds (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, played_at TEXT NOT NULL, player_count INTEGER NOT NULL)')
-    conn.execute('CREATE TABLE IF NOT EXISTS disputes (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, quiz_key TEXT, question_number INTEGER, question TEXT, reason TEXT, created_at TEXT, status TEXT DEFAULT open)')
-    conn.execute('CREATE TABLE IF NOT EXISTS host_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, host_id INTEGER NOT NULL, action TEXT NOT NULL, details TEXT, created_at TEXT NOT NULL)')
     conn.execute('CREATE TABLE IF NOT EXISTS results (round_id INTEGER NOT NULL, user_id INTEGER NOT NULL, name TEXT NOT NULL, score INTEGER NOT NULL, placement INTEGER NOT NULL, PRIMARY KEY(round_id, user_id))')
     columns = {row[1] for row in conn.execute('PRAGMA table_info(rounds)')}
     if 'quiz_key' not in columns:
         conn.execute("ALTER TABLE rounds ADD COLUMN quiz_key TEXT NOT NULL DEFAULT 'legacy'")
     conn.commit()
     return conn
-
-
-def audit_action(interaction, action, details=''):
-    with db_connect() as conn:
-        conn.execute('INSERT INTO host_audit (guild_id, host_id, action, details, created_at) VALUES (?, ?, ?, ?, ?)',
-                     (interaction.guild.id, interaction.user.id, action, details[:500], datetime.now(timezone.utc).isoformat(timespec='seconds')))
 
 
 def question_id(question):
@@ -336,14 +329,15 @@ class Game:
         self.active_view = None
         self.active_message = None
         self.round_number = 0
-        self.pending_results = None
-        self.results_gate = asyncio.Event()
         self.current_question = None
         self.current_question_number = None
         self.pause_started_ns = None
         self.pause_reason = None
         self.question_sent_at = None
         self.question_lock = asyncio.Lock()
+        self.replacement_question = None
+        self.replaced_question_ids = set()
+        self.used_replacement_ids = set()
 
     async def refresh_lobby(self):
         if self.lobby_message and self.phase == 'lobby':
@@ -386,7 +380,16 @@ class Game:
                     return
                 await self.pause_gate.wait()
                 self.round_number = i
-                await self.ask(question, i, False, list(self.players))
+                while True:
+                    await self.pause_gate.wait()
+                    outcome = await self.ask(question, i, False, list(self.players))
+                    if outcome != 'REPLACED':
+                        break
+                    question = self.replacement_question
+                    self.replacement_question = None
+                    self.questions[i - 1] = question
+                    await self.channel.send(embed=status_embed('Replacement Question',
+                        f'Question {i} has been replaced. The previous question is void and awards no points.', True))
                 if self.phase == 'ended':
                     return
                 if not await self.wait_or_end(INTERMISSION_SECONDS):
@@ -431,15 +434,22 @@ class Game:
         # Freeze the *actual* answer deadline when paused, not just the interval
         # between questions. This also keeps existing accepted answers intact.
         while True:
-            if self.phase == 'ended':
+            if self.phase == 'ended' or self.replacement_question is not None:
                 break
-            await self.pause_gate.wait()
+            if self.paused:
+                await asyncio.sleep(0.1)
+                continue
             if time.monotonic_ns() >= view.deadline_ns:
                 break
             await asyncio.sleep(min(0.15, max(0.01, (view.deadline_ns - time.monotonic_ns()) / 1e9)))
         await view.close(message)
         if self.phase == 'ended':
             return set()
+        if self.replacement_question is not None:
+            self.active_view = None
+            self.active_message = None
+            self.current_question = None
+            return 'REPLACED'
         correct = {uid for uid, answer in view.answers.items() if answer == question['answer']}
         # Sort by receipt time, then Discord's unique interaction ID for stable ties.
         correct_in_order = sorted(correct, key=lambda uid: view.answer_receipts[uid][:2])
@@ -481,6 +491,7 @@ class Game:
             tie_pool = load_questions(self.quiz_key).copy()
         with db_connect() as conn:
             used = {r[0] for r in conn.execute('SELECT question_id FROM used_questions WHERE guild_id=?', (self.channel.guild.id,))}
+        tie_pool = [q for q in tie_pool if question_id(q) not in self.used_replacement_ids]
         if self.quiz_key == 'general_knowledge':
             main_ids = {question_id(q) for q in self.questions}
             tie_pool = [q for q in tie_pool if question_id(q) not in main_ids]
@@ -499,17 +510,11 @@ class Game:
         medals = ['🥇', '🥈', '🥉']
         lines = [f'{medals[i] if i < 3 else f"{i+1}."} <@{uid}> — **{self.scores[uid]} pts**'
                  for i, uid in enumerate(final_order)]
-        self.pending_results = final_order
-        self.results_gate.clear()
-        await self.channel.send(embed=status_embed('Results Awaiting Host Approval',
-            'The final standings are ready. An authorised host must use `/quiz-approve-results` to publish and save them. '
-            'Use `/quiz-reject-results` to withhold the results.', True))
-        await self.results_gate.wait()
-        if self.phase == 'ended' or self.pending_results is None:
+        # Publish immediately; the separate approval commands have been removed.
+        if self.phase == 'ended':
             return
         save_round(self, final_order)
         await send_branded(self.channel, embed(f'{QUIZ_NAMES[self.quiz_key]} | Final Standings', '\n'.join(lines), GOLD), 'results', quiz_key=self.quiz_key)
-        await self.channel.send(embed=status_embed('View Previous Results', f'**Theme:** {QUIZ_NAMES[self.quiz_key]}\n**Round history:** `/quiz-history`\n**Theme records:** `/quiz-records`'))
 
     async def resolve_tie(self, tied, score, pool):
         mentions = ' '.join(f'<@{uid}>' for uid in tied)
@@ -608,9 +613,49 @@ class ThemeSelectView(discord.ui.View):
         self.add_item(ThemeSelect(mode, round_number))
 
 
+class ReplacementSelect(discord.ui.Select):
+    def __init__(self, game, candidates):
+        self.game = game
+        self.candidates = candidates
+        options = [discord.SelectOption(label=f'{i + 1}. {q["question"][:80]}', value=str(i),
+                                        description='Select to void the active question')
+                   for i, q in enumerate(candidates)]
+        super().__init__(placeholder='Choose a replacement from the tiebreaker bank', options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        game = self.game
+        if not host_only(interaction):
+            return await private_notice(interaction, 'Only authorised hosts can replace questions.')
+        async with game.question_lock:
+            if (games.get(interaction.guild.id) is not game or not game.paused
+                    or game.phase != 'playing' or not game.active_view or not game.active_view.open
+                    or game.replacement_question is not None):
+                return await private_notice(interaction, 'No paused active question is available for replacement.')
+            chosen = self.candidates[int(self.values[0])]
+            chosen_id = question_id(chosen)
+            if chosen_id in game.used_replacement_ids:
+                return await private_notice(interaction, 'That replacement was already selected. Please reopen the menu.')
+            old_id = question_id(game.current_question)
+            game.replaced_question_ids.add(old_id)
+            game.used_replacement_ids.add(chosen_id)
+            with db_connect() as conn:
+                conn.execute('INSERT OR IGNORE INTO redundant_questions VALUES (?, ?)',
+                             (interaction.guild.id, old_id))
+            game.replacement_question = chosen
+            # The old question's answer receipts are discarded, never scored.
+        await private_notice(interaction,
+            'Replacement selected. The original question is void and will not score. Use /quiz resume to present the replacement.', True)
+
+
+class ReplacementSelectView(discord.ui.View):
+    def __init__(self, game, candidates):
+        super().__init__(timeout=180)
+        self.add_item(ReplacementSelect(game, candidates))
+
+
 @bot.tree.command(name='quiz', description='SS quiz host commands')
 @app_commands.describe(action='Choose a quiz action')
-@app_commands.choices(action=[app_commands.Choice(name=x, value=x) for x in ('start', 'pause', 'resume', 'leaderboard', 'end')])
+@app_commands.choices(action=[app_commands.Choice(name=x, value=x) for x in ('start', 'pause', 'resume', 'replace', 'leaderboard', 'end')])
 async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str]):
     if not interaction.guild:
         return await private_notice(interaction, 'Use this command in a server.', success=False)
@@ -629,18 +674,35 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
     if not game:
         return await private_notice(interaction, 'No quiz is running.', success=False)
     if command == 'end':
-        audit_action(interaction, 'end')
         game.phase = 'ended'
         game.pause_gate.set()
         if game.active_view and game.active_message:
             await game.active_view.close(game.active_message)
-        game.results_gate.set()
         if game.task:
             game.task.cancel()
         games.pop(interaction.guild.id, None)
         return await private_notice(interaction, 'Quiz ended by the host.', success=True)
+    if command == 'replace':
+        if not game.paused or game.phase != 'playing' or not game.active_view or not game.active_view.open:
+            return await private_notice(interaction, 'Pause during an active main-round question before replacing it.')
+        if game.replacement_question is not None:
+            return await private_notice(interaction, 'A replacement has already been selected. Resume the quiz.')
+        try:
+            bank = load_tiebreaker_questions('general_knowledge')
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            return await private_notice(interaction, f'Tiebreaker bank unavailable: {exc}')
+        excluded = ({question_id(q) for q in game.questions} | game.used_replacement_ids |
+                    game.replaced_question_ids)
+        with db_connect() as conn:
+            excluded.update(r[0] for r in conn.execute(
+                'SELECT question_id FROM redundant_questions WHERE guild_id=?', (interaction.guild.id,)))
+        candidates = [q for q in bank if question_id(q) not in excluded]
+        if not candidates:
+            return await private_notice(interaction, 'No unused replacement questions remain in the bank.')
+        return await interaction.response.send_message(
+            'Choose the replacement question. This permanently voids the current question and discards its answers.',
+            view=ReplacementSelectView(game, candidates[:25]), ephemeral=True)
     if command == 'pause':
-        audit_action(interaction, 'pause')
         if game.paused:
             return await private_notice(interaction, 'The quiz is already paused.', success=False)
         game.paused = True
@@ -652,7 +714,6 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
             'Please wait for the host to resume.', True))
         return await private_notice(interaction, 'Quiz paused. The active question timer is frozen.', success=True)
     if command == 'resume':
-        audit_action(interaction, 'resume')
         if not game.paused:
             return await private_notice(interaction, 'The quiz is not paused.', success=False)
         elapsed_ns = time.monotonic_ns() - game.pause_started_ns
@@ -677,274 +738,13 @@ async def quiz(interaction: discord.Interaction, action: app_commands.Choice[str
 
 
 # Operational safeguards and event-day controls.
-@bot.tree.command(name='quiz-system-check', description='Host-only: check quiz banks, permissions and deployment readiness')
-async def quiz_system_check(interaction: discord.Interaction):
-    if not host_only(interaction):
-        return await private_notice(interaction, 'Only authorised hosts may run the system check.')
-    lines = []
-    issues = []
-    for key, name in QUIZ_NAMES.items():
-        try:
-            questions = load_questions(key)
-            if len(questions) < QUESTION_COUNT:
-                raise ValueError(f'Only {len(questions)} valid questions; need {QUESTION_COUNT}')
-            lines.append(f'✅ {name}: {len(questions)} valid questions')
-        except (OSError, ValueError, json.JSONDecodeError) as exc:
-            issues.append(f'❌ {name}: {exc}')
-    try:
-        bank = load_tiebreaker_questions('general_knowledge')
-        lines.append(f'✅ General Knowledge tiebreakers: {len(bank)} valid questions')
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        issues.append(f'❌ General Knowledge tiebreakers: {exc}')
-    try:
-        with db_connect() as conn:
-            conn.execute('SELECT 1').fetchone()
-        lines.append('✅ SQLite database accessible')
-    except Exception as exc:
-        issues.append(f'❌ SQLite database: {exc}')
-    me = interaction.guild.me
-    perms = interaction.channel.permissions_for(me)
-    for label, value in [('Send Messages', perms.send_messages), ('Embed Links', perms.embed_links),
-                         ('Read Message History', perms.read_message_history)]:
-        (lines if value else issues).append(('✅ ' if value else '❌ ') + label)
-    await interaction.response.send_message(embed=status_embed('Pre-event System Check',
-        '\n'.join(lines + issues) + ('\n\n**Action required:** Fix the issues above.' if issues else '\n\n**All checked items passed.**')), ephemeral=True)
 
-@bot.tree.command(name='quiz-approve-results', description='Host-only: publish and save the pending final standings')
-async def quiz_approve_results(interaction: discord.Interaction):
-    if not host_only(interaction):
-        return await private_notice(interaction, 'Only authorised hosts can approve results.')
-    game = games.get(interaction.guild.id)
-    if not game or game.pending_results is None or game.results_gate.is_set():
-        return await private_notice(interaction, 'No results are awaiting approval.')
-    audit_action(interaction, 'approve_results')
-    game.results_gate.set()
-    await private_notice(interaction, 'Approved. Final standings will now be published and saved.', True)
 
-@bot.tree.command(name='quiz-reject-results', description='Host-only: withhold pending results without saving them')
-async def quiz_reject_results(interaction: discord.Interaction):
-    if not host_only(interaction):
-        return await private_notice(interaction, 'Only authorised hosts can reject results.')
-    game = games.get(interaction.guild.id)
-    if not game or game.pending_results is None or game.results_gate.is_set():
-        return await private_notice(interaction, 'No results are awaiting approval.')
-    audit_action(interaction, 'reject_results')
-    game.pending_results = None
-    game.results_gate.set()
-    await private_notice(interaction, 'Results withheld; no official results will be saved.', True)
 
-@bot.tree.command(name='quiz-dispute', description='Privately flag a live quiz question for host review')
-@app_commands.describe(reason='Briefly explain the concern about the question')
-async def quiz_dispute(interaction: discord.Interaction, reason: str):
-    game = games.get(interaction.guild.id) if interaction.guild else None
-    if not game or game.current_question is None or interaction.user.id not in game.players:
-        return await private_notice(interaction, 'You can only dispute a question while participating in a live quiz.')
-    reason = reason.strip()
-    if not 5 <= len(reason) <= 400:
-        return await private_notice(interaction, 'Please provide a reason between 5 and 400 characters.')
-    with db_connect() as conn:
-        cursor = conn.execute('INSERT INTO disputes (guild_id, user_id, quiz_key, question_number, question, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (interaction.guild.id, interaction.user.id, game.quiz_key, game.current_question_number,
-             game.current_question['question'], reason, datetime.now(timezone.utc).isoformat(timespec='seconds')))
-        dispute_id = cursor.lastrowid
-    await private_notice(interaction, f'Dispute #{dispute_id} submitted privately. A host can review it using `/quiz-disputes`.', True)
 
-@bot.tree.command(name='quiz-disputes', description='Host-only: review recent quiz question disputes')
-async def quiz_disputes(interaction: discord.Interaction):
-    if not host_only(interaction):
-        return await private_notice(interaction, 'Only authorised hosts can view disputes.')
-    with db_connect() as conn:
-        rows = conn.execute('SELECT id, user_id, question_number, question, reason FROM disputes WHERE guild_id=? ORDER BY id DESC LIMIT 10', (interaction.guild.id,)).fetchall()
-    lines = [f'**#{rid} · Q{num} · <@{uid}>**\n{question[:140]}\nReason: {reason[:250]}' for rid, uid, num, question, reason in rows]
-    await interaction.response.send_message(embed=status_embed('Recent Question Disputes', '\n\n'.join(lines) or 'No disputes submitted.'), ephemeral=True)
 
 # Event-day controls: host-only, no extra public messages except cancellation notices.
-@bot.tree.command(name='quiz-host-status', description='Host-only: view live quiz status and unresolved disputes')
-async def quiz_host_status(interaction: discord.Interaction):
-    if not host_only(interaction):
-        return await private_notice(interaction, 'Only authorised hosts can view quiz status.')
-    game = games.get(interaction.guild.id)
-    if not game:
-        return await private_notice(interaction, 'No quiz is active.')
-    view = game.active_view
-    answers = len(view.answers) if view else 0
-    eligible = len(view.eligible) if view else len(game.players)
-    remaining = (max(0, (view.deadline_ns - (game.pause_started_ns if game.paused else time.monotonic_ns())) / 1e9)
-                 if view and view.deadline_ns else None)
-    with db_connect() as conn:
-        disputes = conn.execute("SELECT COUNT(*) FROM disputes WHERE guild_id=? AND status='open'", (interaction.guild.id,)).fetchone()[0]
-    details = (f'**Category:** {QUIZ_NAMES[game.quiz_key]}\n**Phase:** {game.phase}\n'
-               f'**Paused:** {"Yes" if game.paused else "No"}\n**Question:** {game.current_question_number or game.round_number}/{QUESTION_COUNT}\n'
-               f'**Registered:** {len(game.players)}\n**Answers:** {answers}/{eligible}\n'
-               f'**Time remaining:** {remaining:.1f}s\n' if remaining is not None else
-               f'**Category:** {QUIZ_NAMES[game.quiz_key]}\n**Phase:** {game.phase}\n**Paused:** {game.paused}\n'
-               f'**Question:** {game.round_number}/{QUESTION_COUNT}\n**Registered:** {len(game.players)}\n')
-    details += f'**Open disputes:** {disputes}\n**Pending results approval:** {game.pending_results is not None}'
-    await interaction.response.send_message(embed=status_embed('Host Dashboard', details), ephemeral=True)
 
-
-@bot.tree.command(name='quiz-host-audit', description='Host-only: show the most recent host actions')
-async def quiz_host_audit(interaction: discord.Interaction):
-    if not host_only(interaction):
-        return await private_notice(interaction, 'Only authorised hosts can view the audit log.')
-    with db_connect() as conn:
-        rows = conn.execute('SELECT host_id, action, details, created_at FROM host_audit WHERE guild_id=? ORDER BY id DESC LIMIT 15', (interaction.guild.id,)).fetchall()
-    lines = [f'`{when[5:16].replace("T", " ")} UTC` <@{uid}> — **{action}** {details or ""}' for uid, action, details, when in rows]
-    await interaction.response.send_message(embed=status_embed('Host Action Audit', '\n'.join(lines) or 'No actions recorded.'), ephemeral=True)
-
-# Isolated host-only tiebreaker testing; never writes scores or question usage to SQLite.
-tiebreaker_tests = {}
-TEST_JOIN_SECONDS = 30
-TEST_READY_SECONDS = 10
-
-
-class TestTiebreakerJoinView(discord.ui.View):
-    def __init__(self, session):
-        super().__init__(timeout=None)
-        self.session = session
-
-    @discord.ui.button(label='Join Test', style=discord.ButtonStyle.primary)
-    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
-        session = self.session
-        if not session['joining']:
-            return await private_notice(interaction, 'Test registration has closed.')
-        if interaction.user.id in session['players']:
-            return await private_notice(interaction, 'You have already joined this test.')
-        if len(session['players']) >= MAX_PLAYERS:
-            return await private_notice(interaction, 'The test is full.')
-        session['players'][interaction.user.id] = interaction.user.display_name
-        await private_notice(interaction, 'You are registered for the tiebreaker test.', True)
-
-
-async def run_tiebreaker_test(channel, session):
-    guild_id = channel.guild.id
-    game = None
-    try:
-        await asyncio.sleep(TEST_JOIN_SECONDS)
-        session['joining'] = False
-        if len(session['players']) < 2:
-            await channel.send(embed=status_embed('Test Cancelled', 'At least two players must join the tiebreaker test.'))
-            return
-        # An isolated Game instance reuses the real question buttons and answer evaluation.
-        # It is deliberately not added to `games` and never calls finish() or save_round().
-        pool = load_tiebreaker_questions('general_knowledge')
-        random.shuffle(pool)
-        game = Game(channel, session['host_id'], [], 'general_knowledge')
-        game.players = dict(session['players'])
-        game.scores = {uid: 0 for uid in game.players}
-        game.phase = 'tiebreaker'
-        session['game'] = game
-        await channel.send(embed=themed_embed(
-            '🧪 General Knowledge | Tiebreaker Test',
-            f'**Participants:** {len(game.players)}\n'
-            f'**Preparation:** {TEST_READY_SECONDS} seconds\n'
-            f'**Answer window:** {ANSWER_SECONDS} seconds per question\n\n'
-            'This is a practice session. Scores, records and used-question history will not be changed.',
-            ROUND_STYLE['general_knowledge'][1]))
-        await asyncio.sleep(TEST_READY_SECONDS)
-        survivors = list(game.players)
-        eliminated = []
-        round_no = 0
-        while len(survivors) > 1 and pool and not session['cancelled']:
-            round_no += 1
-            question = pool.pop()
-            correct = await game.ask(question, round_no, True, survivors)
-            if session['cancelled']:
-                break
-            if not correct:
-                msg = 'Nobody answered correctly; all participants remain.'
-            elif len(correct) == len(survivors):
-                msg = 'Everyone answered correctly; all participants remain.'
-            else:
-                knocked_out = [uid for uid in survivors if uid not in correct]
-                eliminated = knocked_out + eliminated
-                survivors = [uid for uid in survivors if uid in correct]
-                msg = f'**Remaining:** {", ".join(discord.utils.escape_markdown(game.players[uid]) for uid in survivors)}'
-            await channel.send(embed=themed_embed('🧪 Test | Sudden Death Result', msg, ROUND_STYLE['general_knowledge'][1]))
-            if len(survivors) > 1:
-                await asyncio.sleep(INTERMISSION_SECONDS)
-        if not session['cancelled']:
-            if len(survivors) == 1:
-                msg = f'**Winner:** {discord.utils.escape_markdown(game.players[survivors[0]])}\nQuestions used: {round_no}'
-            else:
-                msg = f'No single winner after {round_no} questions. The test question bank was exhausted.'
-            await channel.send(embed=themed_embed('🧪 Tiebreaker Test Complete', msg + '\n\nNo official scores or records were saved.', ROUND_STYLE['general_knowledge'][1]))
-    except asyncio.CancelledError:
-        session['cancelled'] = True
-        raise
-    except Exception:
-        import traceback
-        traceback.print_exc()
-        await channel.send(embed=status_embed('Test Error', 'The test encountered an error. Check the Railway logs.'))
-    finally:
-        session['joining'] = False
-        if game:
-            game.phase = 'ended'
-            if game.active_view and game.active_message:
-                await game.active_view.close(game.active_message)
-        if tiebreaker_tests.get(guild_id) is session:
-            tiebreaker_tests.pop(guild_id, None)
-
-
-@bot.tree.command(name='quiz-test-tiebreaker', description='Host-only: run an isolated General Knowledge tiebreaker test')
-async def quiz_test_tiebreaker(interaction: discord.Interaction):
-    if not host_only(interaction):
-        return await private_notice(interaction, 'Only authorised quiz hosts can start this test.')
-    guild_id = interaction.guild.id
-    if guild_id in tiebreaker_tests:
-        return await private_notice(interaction, 'A tiebreaker test is already active in this server.')
-    if guild_id in games:
-        return await private_notice(interaction, 'Finish the live quiz before starting a test.')
-    try:
-        load_tiebreaker_questions('general_knowledge')
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        return await private_notice(interaction, f'Tiebreaker question bank error: {exc}')
-    session = {'host_id': interaction.user.id, 'players': {}, 'joining': True, 'cancelled': False, 'game': None, 'task': None}
-    tiebreaker_tests[guild_id] = session
-    await interaction.response.send_message('Starting the isolated tiebreaker test...', ephemeral=True)
-    try:
-        await interaction.channel.send(
-            embed=themed_embed('🧪 Tiebreaker Test Lobby',
-                f'**General Knowledge** • Join within **{TEST_JOIN_SECONDS} seconds**.\n'
-                'At least two participants required.\n'
-                f'Then **{TEST_READY_SECONDS}s preparation** and **{ANSWER_SECONDS}s per question**.\n'
-                'This test will not affect official quiz scores or history.', ROUND_STYLE['general_knowledge'][1]),
-            view=TestTiebreakerJoinView(session))
-        session['task'] = asyncio.create_task(run_tiebreaker_test(interaction.channel, session))
-    except Exception:
-        tiebreaker_tests.pop(guild_id, None)
-        raise
-
-
-@bot.tree.command(name='quiz-stop-tiebreaker-test', description='Host-only: stop an active tiebreaker test')
-async def quiz_stop_tiebreaker_test(interaction: discord.Interaction):
-    if not host_only(interaction):
-        return await private_notice(interaction, 'Only authorised quiz hosts can stop this test.')
-    session = tiebreaker_tests.get(interaction.guild.id)
-    if not session:
-        return await private_notice(interaction, 'No tiebreaker test is active.')
-    session['cancelled'] = True
-    session['joining'] = False
-    if session['task']:
-        session['task'].cancel()
-    else:
-        tiebreaker_tests.pop(interaction.guild.id, None)
-    await private_notice(interaction, 'Tiebreaker test stopped.', True)
-
-
-@bot.tree.command(name='quiz-history', description='View a completed quiz round, or the latest results')
-@app_commands.describe(round_number='Optional round ID shown on the results')
-async def quiz_history(interaction: discord.Interaction, round_number: int | None = None):
-    if not interaction.guild:
-        return await private_notice(interaction, 'Use this command in a server.', success=False)
-    await interaction.response.send_message('Choose the quiz to view its history:', view=ThemeSelectView('history', round_number), ephemeral=True)
-
-
-@bot.tree.command(name='quiz-records', description='All-time leaderboard for each quiz theme')
-async def quiz_records(interaction: discord.Interaction):
-    if not interaction.guild:
-        return await private_notice(interaction, 'Use this command in a server.', success=False)
-    await interaction.response.send_message('Choose the quiz to view its records:', view=ThemeSelectView('records'), ephemeral=True)
 
 
 @bot.tree.command(name='quiz-role-panel', description='Post the Secret Service quiz reaction-role announcement')
@@ -1047,6 +847,8 @@ async def setup_hook():
         guild = discord.Object(id=GUILD_ID)
         bot.tree.copy_global_to(guild=guild)
         await bot.tree.sync(guild=guild)
+        # Also remove obsolete global commands from older deployments.
+        await bot.tree.sync()
     else:
         await bot.tree.sync()
 
