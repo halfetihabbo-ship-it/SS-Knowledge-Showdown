@@ -642,6 +642,15 @@ async def update_quiz_role(payload, add):
         if member.bot:
             return
         if add:
+            print(f"Guild: {guild.name} ({guild.id})")
+            print(f"Bot: {guild.me} ({guild.me.id})")
+            print(f"Bot top role: {guild.me.top_role.name} ({guild.me.top_role.position})")
+            print(f"Manage Roles: {guild.me.guild_permissions.manage_roles}")
+            print(f"Target role: {role.name} ({role.id})")
+            print(f"Target role position: {role.position}")
+            print(f"Target role managed: {role.managed}")
+            print(f"Can manage role: {guild.me.top_role > role}")
+            print(f"Target member: {member} ({member.id})")
             await member.add_roles(role, reason='Reacted to the SS Quiz role panel')
         else:
             await member.remove_roles(role, reason='Removed reaction from the SS Quiz role panel')
